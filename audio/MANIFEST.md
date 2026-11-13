@@ -83,7 +83,7 @@ v2 鼓点（2026-11-13 按「加一些鼓点，方便对齐动作」修改）：
 ## 重新生成
 
 ```bash
-cd /workspace/ghoul-action/audio/_src
+cd audio/_src
 /opt/audio-venv/bin/python compose.py            # 全部；或 compose.py title battle boss_a boss_b feiyan feiyan_boss victory
 /opt/audio-venv/bin/python check.py && /opt/audio-venv/bin/python manifest.py
 ```

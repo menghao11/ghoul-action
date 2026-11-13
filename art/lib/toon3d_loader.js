@@ -1,6 +1,6 @@
 // 赤骸夜行 3D 角色加载助手（Three.js r170）
 // 用法：
-//   import { loadCharacter } from './art/lib/ghoul3d_loader.js';
+//   import { loadCharacter } from './art/lib/toon3d_loader.js';
 //   const ch = await loadCharacter('./art/models/lingye.glb', { toon: true, outline: 0.012 });
 //   scene.add(ch.root); ch.play('idle'); 每帧 ch.update(dt);
 //   ch.sockets.tendril_root  → 血绫根节点（Object3D，随 Spine 骨骼运动）

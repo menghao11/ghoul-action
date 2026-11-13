@@ -13,7 +13,7 @@ function rotateStrip(tex) {
 export class ArtFX {
   constructor(world) { this.w = world; this.ok = false; this.loaded = []; this.pool = []; }
   async load() {
-    const names = { stripE: 'kagune_strip_emissive_256x1024.png', stripA: 'kagune_strip_albedo_256x1024.png', ring: 'impact_ring_512.png', sheet: 'hit_spark_sheet_4x4_1024.png', star: 'flare_star_512.png', arc: 'slash_arc_512.png', glint: 'kakugan_glint_256.png', glow: 'glow_red_256.png' };
+    const names = { stripE: 'tendril_strip_emissive_256x1024.png', stripA: 'tendril_strip_albedo_256x1024.png', ring: 'impact_ring_512.png', sheet: 'hit_spark_sheet_4x4_1024.png', star: 'flare_star_512.png', arc: 'slash_arc_512.png', glint: 'eye_glint_256.png', glow: 'glow_red_256.png' };
     const T = {}; await Promise.all(Object.entries(names).map(async ([k, f]) => { T[k] = await load(FX + f); if (T[k]) this.loaded.push(f); }));
     this.T = T; if (!this.loaded.length) return this;
     if (T.stripE) setGlowTexture('*', rotateStrip(T.stripE));

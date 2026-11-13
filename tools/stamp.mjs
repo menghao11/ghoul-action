@@ -1,9 +1,9 @@
-// 给 index.html 打缓存版本号（GitHub Pages 静态托管用）：node tools/stamp.mjs
+// 给 index.html 打缓存版本号（GitHub Pages 静态托管用）：node tools/stamp.mjs [目录，默认仓库根目录]
 // - style.css / src/main.js 加 ?v=<内容哈希>
 // - import map 为每个 src/*.js 建立 "./src/x.js" → "./src/x.js?v=…" 映射，模块内部的相对 import 也能被刷新
 // 全部是相对路径，可以部署在子路径（如 https://<user>.github.io/ghoul-action/）下。
 import fs from 'fs'; import path from 'path'; import crypto from 'crypto';
-const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const root = path.resolve(process.argv[2] || path.join(path.dirname(new URL(import.meta.url).pathname), '..')); // 可传目录（build_dist 用来给 dist/ 打版本号）
 const files = fs.readdirSync(path.join(root, 'src')).filter((f) => f.endsWith('.js')).sort();
 const h = crypto.createHash('sha1'); for (const f of ['style.css', ...files.map((f) => 'src/' + f)]) h.update(fs.readFileSync(path.join(root, f)));
 const v = h.digest('hex').slice(0, 8);

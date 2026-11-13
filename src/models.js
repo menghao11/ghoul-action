@@ -1,9 +1,9 @@
-// 画图王的 3D 角色接入：预加载 GLB（卡通材质 + 蒙皮描边，用 art/lib/ghoul3d_loader.js），
+// 画图王的 3D 角色接入：预加载 GLB（卡通材质 + 蒙皮描边，用 art/lib/toon3d_loader.js），
 // 按实例克隆（共享几何/贴图），给 Player/Enemy 提供和程序化骨架相同的接口（root/body/back/upperBack/meshes）。
 // 动画 clip 原地播放，位移仍由游戏代码驱动；按招式出手时间缩放 clip，状态间交叉淡化。
 // 资源缺失或 ?models=0 时返回 null → 游戏自动退回程序化占位模型。
 import * as THREE from 'three';
-import { loadCharacter } from '../art/lib/ghoul3d_loader.js';
+import { loadCharacter } from '../art/lib/toon3d_loader.js';
 import { GLTFLoader } from '../art/lib/loaders/GLTFLoader.js';
 import { clone as skClone } from '../art/lib/utils/SkeletonUtils.js';
 
@@ -20,11 +20,11 @@ export async function preloadModels({ mobile = false, quality = 'mid' } = {}) {
     const [h, boss, melee, ranged, brute, cleaver, blade] = await Promise.all([
       loadCharacter(BASE + hero, { outline, emissiveIntensity: 1.4 }),
       loadCharacter(BASE + 'tieheng.glb', { outline: outline ? 0.016 : 0 }),
-      loadCharacter(BASE + 'ghoul_melee.glb', { outline, emissiveIntensity: 1.8 }),
-      loadCharacter(BASE + 'ghoul_ranged.glb', { outline, emissiveIntensity: 1.8 }),
-      loadCharacter(BASE + 'ghoul_brute.glb', { outline: outline ? 0.014 : 0, emissiveIntensity: 1.8 }),
-      new GLTFLoader().loadAsync(BASE + 'quinque_crowcleaver.glb'),
-      new GLTFLoader().loadAsync(BASE + 'blade_ghoul.glb'),
+      loadCharacter(BASE + 'foe_melee.glb', { outline, emissiveIntensity: 1.8 }),
+      loadCharacter(BASE + 'foe_ranged.glb', { outline, emissiveIntensity: 1.8 }),
+      loadCharacter(BASE + 'foe_brute.glb', { outline: outline ? 0.014 : 0, emissiveIntensity: 1.8 }),
+      new GLTFLoader().loadAsync(BASE + 'cleaver_crow.glb'),
+      new GLTFLoader().loadAsync(BASE + 'blade_foe.glb'),
     ]);
     Object.assign(Models.t, { hero: h, boss, grunt: melee, shooter: ranged, brute });
     Models.props.cleaver = toonProps(cleaver.scene); Models.props.blade = toonProps(blade.scene);

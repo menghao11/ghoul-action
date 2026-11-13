@@ -41,7 +41,7 @@ export async function loadArtGlow(base = 'art/') {
   for (const rel of [...new Set(found)]) {
     const url = /^https?:/.test(rel) ? rel : base + rel.replace(/^\//, "").replace(/^(\.\/)?(art\/)?/, '');
     const low = rel.toLowerCase(); let kind = forced[rel] || '*';
-    if (!forced[rel] && !/tendril|kagune|血绫/.test(low) && !Object.values(KIND_KEYS).flat().some((w) => low.includes(w))) continue; // 只要血绫用的发光贴图（通用辉光精灵等交给 artfx.js）
+    if (!forced[rel] && !/tendril|血绫/.test(low) && !Object.values(KIND_KEYS).flat().some((w) => low.includes(w))) continue; // 只要血绫用的发光贴图（通用辉光精灵等交给 artfx.js）
     if (!forced[rel]) for (const [k, keys] of Object.entries(KIND_KEYS)) if (keys.some((w) => low.includes(w))) kind = k;
     try { const tex = await loader.loadAsync(url); setGlowTexture(kind, tex); done.push({ url, kind }); } catch (e) { console.warn('glow texture failed', url); }
   }

@@ -436,24 +436,35 @@ const frameShot = async (p, name) => { await p.evaluate(() => new Promise((r) =>
   await ip.p.evaluate(() => { clearInterval(window.__auto); __dbg.setQuality('mid'); try { localStorage.removeItem('ghoul_quality'); } catch (e) {} });
   check('iPhone: 全程无页面错误', ip.errs.length === 0, ip.errs.slice(0, 5));
   await ip.ctx.close();
-  // ================= 干净导出：git archive HEAD 放到子路径 /ghoul-action/ 下运行（模拟 GitHub Pages）=================
+  // ================= 干净导出：git archive HEAD 和由它构建的 dist/，分别放到子路径 /ghoul-action/ 下运行（模拟 GitHub Pages）=================
   {
     const { execSync, spawn } = require('child_process'); const os = require('os');
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ghoul-export-')); const dir = path.join(root, 'ghoul-action'); fs.mkdirSync(dir);
     const repo = path.join(__dirname, '..'); const head = execSync('git rev-parse --short HEAD', { cwd: repo }).toString().trim();
-    execSync(`git archive HEAD | tar -x -C "${dir}"`, { cwd: repo, shell: '/bin/bash' });
-    const port = 8799; const srv = spawn('python3', ['-m', 'http.server', String(port), '--bind', '127.0.0.1'], { cwd: root, stdio: 'ignore' }); await sleep(1200);
-    const cE = await b.newContext({ viewport: { width: 1024, height: 576 } }); const pE = await cE.newPage(); const bad = [], cerr = [], reqs = new Set();
-    pE.on('response', (r) => { reqs.add(r.url()); if (r.status() >= 400) bad.push(r.status() + ' ' + r.url()); });
-    pE.on('requestfailed', (r) => bad.push('failed ' + r.url())); pE.on('pageerror', (e) => cerr.push('pageerror: ' + e.message)); pE.on('console', (m) => { if (m.type() === 'error') cerr.push(m.text()); });
-    await pE.goto(`http://127.0.0.1:${port}/ghoul-action/?autostart=1&nolock=1`); await pE.waitForFunction(() => window.__dbg && window.__dbg.ready, null, { timeout: 60000 });
-    await pE.mouse.click(500, 300); await pE.waitForFunction(() => window.__artGlow !== undefined && __dbg.music().decoded.length >= 7, null, { timeout: 90000 }).catch(() => {});
-    await pE.evaluate(() => { __dbg.god(true); __dbg.fillEnergy(); __dbg.press('ult'); }); await sleep(3000);
-    const info = await pE.evaluate(() => ({ glow: window.__artGlow, models: __dbg.models().ok ?? __dbg.models(), music: __dbg.music().status, decoded: __dbg.music().decoded.length, build: document.querySelector('meta[name=build]')?.content }));
-    srv.kill(); await cE.close(); try { fs.rmSync(root, { recursive: true, force: true }); } catch (e) {}
-    const urls = [...reqs]; const outside = urls.filter((u) => !/^(blob|data):/.test(u) && !u.includes(`/ghoul-action/`));
-    check('干净导出（git archive HEAD，子路径 /ghoul-action/）：零 404/失败请求、零控制台错误，manifest/模型/配乐都能加载', bad.length === 0 && cerr.length === 0 && outside.length === 0 && info.glow && info.glow.length >= 1 && info.decoded >= 7 && urls.some((u) => /art\/manifest\.json/.test(u)),
-      { head, requests: urls.length, bad, consoleErrors: cerr.slice(0, 5), outside: outside.slice(0, 3), glow: info.glow, decoded: info.decoded, music: info.music, build: info.build });
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ghoul-export-'));
+    const rootA = path.join(tmp, 'a'); const dirA = path.join(rootA, 'ghoul-action'); fs.mkdirSync(dirA, { recursive: true });
+    execSync(`git archive HEAD | tar -x -C "${dirA}"`, { cwd: repo, shell: '/bin/bash' });
+    const rootD = path.join(tmp, 'd'); const dirD = path.join(rootD, 'ghoul-action'); fs.mkdirSync(rootD, { recursive: true });
+    const buildOut = execSync(`node tools/build_dist.mjs "${dirD}"`, { cwd: dirA }).toString().trim().split('\n').pop();
+    const listAll = (d) => { const r = []; const w = (x) => { for (const f of fs.readdirSync(x)) { const q = path.join(x, f); if (fs.statSync(q).isDirectory()) w(q); else r.push(path.relative(d, q)); } }; w(d); return r; };
+    const distFiles = listAll(dirD); const distBad = distFiles.filter((f) => /^(tests|tools|shots|review|\.github)\/|README|_src\/|concepts\/|previews\//.test(f) || /ghoul|kagune|kakugan|quinque|rinkaku/i.test(f));
+    const runAt = async (root, port) => {
+      const srv = spawn('python3', ['-m', 'http.server', String(port), '--bind', '127.0.0.1'], { cwd: root, stdio: 'ignore' }); await sleep(1200);
+      const cE = await b.newContext({ viewport: { width: 1024, height: 576 } }); const pE = await cE.newPage(); const bad = [], cerr = [], reqs = new Set();
+      pE.on('response', (r) => { reqs.add(r.url()); if (r.status() >= 400) bad.push(r.status() + ' ' + r.url()); });
+      pE.on('requestfailed', (r) => bad.push('failed ' + r.url())); pE.on('pageerror', (e) => cerr.push('pageerror: ' + e.message)); pE.on('console', (m) => { if (m.type() === 'error') cerr.push(m.text()); });
+      try {
+        await pE.goto(`http://127.0.0.1:${port}/ghoul-action/?autostart=1&nolock=1`); await pE.waitForFunction(() => window.__dbg && window.__dbg.ready, null, { timeout: 60000 });
+        await pE.mouse.click(500, 300); await pE.waitForFunction(() => window.__artGlow !== undefined && __dbg.music().decoded.length >= 7, null, { timeout: 90000 }).catch(() => {});
+        await pE.evaluate(() => { __dbg.god(true); __dbg.fillEnergy(); __dbg.press('ult'); }); await sleep(3000);
+        const info = await pE.evaluate(() => ({ glow: window.__artGlow, models: __dbg.models().ok, heroModel: __dbg.models().heroIsModel, decoded: __dbg.music().decoded.length, build: document.querySelector('meta[name=build]')?.content }));
+        const urls = [...reqs]; const outside = urls.filter((u) => !/^(blob|data):/.test(u) && !u.includes(`/ghoul-action/`));
+        return { ok: bad.length === 0 && cerr.length === 0 && outside.length === 0 && info.glow && info.glow.length >= 1 && info.decoded >= 7 && info.models && info.heroModel && urls.some((u) => /art\/manifest\.json/.test(u)), requests: urls.length, bad, consoleErrors: cerr.slice(0, 5), outside: outside.slice(0, 3), ...info };
+      } finally { srv.kill(); await cE.close(); }
+    };
+    const rA = await runAt(rootA, 8799); const rD = await runAt(rootD, 8798);
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+    check('干净导出（git archive HEAD，子路径 /ghoul-action/）：零 404/失败请求、零控制台错误，manifest/模型/配乐都能加载', rA.ok, { head, ...rA });
+    check('Pages dist/（由干净导出构建，子路径 /ghoul-action/）：只含运行时文件、无 IP 文件名，零 404、零控制台错误', rD.ok && distBad.length === 0, { head, build: buildOut, files: distFiles.length, distBad, ...rD });
   }
   await b.close();
   const pass = results.filter((r) => r.pass).length;

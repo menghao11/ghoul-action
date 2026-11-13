@@ -3,14 +3,14 @@
 浏览器里直接玩的 3D 第三人称动作战斗原型。灵感来自“都市夜色 + 体内长出的武器”这类主题，**所有角色、组织、能力名称都是原创**。
 技术：Three.js r170（已内置在 `vendor/`，离线可跑，无需构建），原生 ES Module。
 
-> 本仓库只在本地提交，**没有推送、没有发布**。
+在线试玩：https://menghao11.github.io/ghoul-action/
 
 ## 运行
 
 ```bash
-cd /workspace/ghoul-action
-python3 -m http.server 8792 --bind 127.0.0.1
-# 桌面浏览器打开 http://127.0.0.1:8792/
+# 在仓库根目录起任意静态服务器，例如：
+python3 -m http.server 8000
+# 浏览器打开 http://localhost:8000/
 # 强制触屏界面：?touch=1   指定画质：?q=high|mid|low   跳过开始面板：?autostart=1
 ```
 
@@ -84,7 +84,7 @@ python3 -m http.server 8792 --bind 127.0.0.1
 - **配乐节拍辉光**：血绫辉光随音乐拍点做很小的余弦起伏（`world.music.musicBeatPhase`）。
 
 ## 3D 角色（画图王）
-- `art/models/`：凌夜 `lingye.glb`（触屏/中低画质用 `lingye_1k.glb`）、铁衡 `tieheng.glb`（缩放 1.32 ≈ 2.8 m，猎械「鸦断」挂 `hand_R_socket`）、骨刃 `ghoul_melee.glb`（+锯齿砍刀）、晶刺 `ghoul_ranged.glb`、铁枷 `ghoul_brute.glb`。用 `art/lib/ghoul3d_loader.js` 的卡通材质 + 蒙皮描边，`SkeletonUtils.clone` 实例化（共享几何/贴图）。
+- `art/models/`：凌夜 `lingye.glb`（触屏/中低画质用 `lingye_1k.glb`）、铁衡 `tieheng.glb`（缩放 1.32 ≈ 2.8 m，猎械「鸦断」挂 `hand_R_socket`）、骨刃 `foe_melee.glb`（+锯齿砍刀）、晶刺 `foe_ranged.glb`、铁枷 `foe_brute.glb`。用 `art/lib/toon3d_loader.js` 的卡通材质 + 蒙皮描边，`SkeletonUtils.clone` 实例化（共享几何/贴图）。
 - 动画原地播放、位移由代码驱动；按招式第一次出手时间缩放 clip（如 light1 出手帧 0.14 s 对齐判定帧），状态间 0.05–0.25 s 交叉淡化。血绫从 `tendril_root` 长出。蒙皮残影用“冻结骨架”快照。
 - 已知美术问题的处理：铁衡 `sweep` 第一段刀身竖着 → 该 clip 期间把武器绕刀身轴转 90°。
 - `art/fx/`：血绫管体条带（albedo + emissive）、冲击环、命中火花序列帧、四芒星闪（完美闪避/重击/终焉）、月牙斩（近战出手）、赫眼光晕（绯魇/完美闪避）。
@@ -97,10 +97,12 @@ python3 -m http.server 8792 --bind 127.0.0.1
 - 绯魇叠加层：杂兵战用 `layer_feiyan`（战斗曲小节线进入），Boss 战用 `layer_feiyan_boss`（Boss 曲小节线进入）。子弹时间时音乐整体低通。
 - 首次手势解锁 AudioContext（iOS）；操作面板里有音乐/音效音量滑杆（保存在 localStorage）；没有 audio/ 时静默降级为只有音效。
 
-## 发布到 GitHub Pages（准备好了，未发布）
-- 全部相对路径，可放在子路径（如 `/ghoul-action/`）下；不依赖目录列表；有 `.nojekyll`。
-- 缓存版本号：`node tools/stamp.mjs` 给 `style.css`、`src/main.js` 和 import map 里每个 `src/*.js` 加 `?v=<内容哈希>`。每次改代码后、提交前跑一次。
-- 运行时清单是入库的 `art/manifest.json`（只列游戏用到的贴图）；画图王的 `art/MANIFEST.md`、概念图、预览图不随网页发布。测试会从 `git archive HEAD` 的干净导出、挂在 `/ghoul-action/` 子路径下运行，要求零 404、零控制台错误。
+## 发布到 GitHub Pages
+- 发布方式：**GitHub Actions**（`.github/workflows/pages.yml`）。每次推送到 `main`，工作流运行 `node tools/build_dist.mjs dist`，只把运行时文件上传部署：`index.html`、`style.css`、`.nojekyll`、`src/`、`vendor/`、`art/lib/`、`art/manifest.json`、游戏用到的 `art/models/*.glb`、`art/fx/*.png`、`audio/MANIFEST.md` 和 `audio/*.ogg|m4a`（约 17 MB）。`tests/`、`tools/`、`shots/`、README、美术/音频源文件不会发布。
+- **首次切换**：仓库 Settings → Pages → Build and deployment → Source 改成 **GitHub Actions**（原来是 “Deploy from a branch”）。
+- 本地预览发布内容：`node tools/build_dist.mjs`，然后在 `dist/` 里起静态服务器；`dist/` 不入库。
+- 全部相对路径，可放在子路径（`/ghoul-action/`）下；不依赖目录列表。构建时自动跑 `tools/stamp.mjs` 给 `style.css`、`src/main.js` 和 import map 里每个 `src/*.js` 加 `?v=<内容哈希>`（改代码后提交前也可以手动跑一次，让仓库里的 index.html 同步）。
+- 运行时清单是 `art/manifest.json`（只列游戏用到的贴图）。测试会把 `git archive HEAD` 的干净导出、以及由它构建的 `dist/` 分别挂在 `/ghoul-action/` 子路径下运行，要求零 404、零控制台错误。
 
 ## 架构
 
@@ -123,6 +125,8 @@ src/models.js / artfx.js   3D 角色接入（克隆、clip 驱动、预算统计
 src/grade.js               绯魇调色后期 pass
 src/music.js               配乐管理（清单解析、交叉淡化、小节线切换、绯魇层、音量）
 tools/stamp.mjs            缓存版本号
+tools/build_dist.mjs       生成只含运行时文件的 dist/（Pages 发布用）
+.github/workflows/pages.yml  GitHub Actions：构建 dist/ 并部署到 Pages
 tests/smoke.js             Playwright 自动化测试（见下）
 tests/boss_ttk.js          Boss 击杀时长基准
 tests/gallery.js           截图集
@@ -133,8 +137,9 @@ tests/gallery.js           截图集
 ## 测试
 
 ```bash
-NODE_PATH=/workspace/pw-tools/node_modules node tests/smoke.js http://127.0.0.1:8792/
-NODE_PATH=/workspace/pw-tools/node_modules node tests/gallery.js http://127.0.0.1:8792/
+# 先在仓库根目录起静态服务器（同上），NODE_PATH 指向装了 playwright 的 node_modules
+NODE_PATH=<playwright 所在的 node_modules> node tests/smoke.js http://localhost:8000/
+NODE_PATH=<playwright 所在的 node_modules> node tests/gallery.js http://localhost:8000/
 ```
 覆盖：加载无报错、四种血绫切换 + 各自连招命中、晶刺弹、挑空 + 空中连段 + 坠星、完美闪避 → 子弹时间 → 瞬影反击、未闪避不误触发、完美格挡、闪反、绯魇（护甲/缠身血绫）、终焉、Boss 预警 + 三阶段 + 调试击败、锁定/切换目标、**无晃屏检查**（源码扫描 + 720 帧实战相机轨迹：FOV 恒定、零滚转、位置/朝向无振荡；并有“注入轻微晃屏必须被抓到”的反向自检）、逻辑耗时、全流程自动战斗通关、iPhone 横屏触屏按钮实点、桌面/iPhone FPS。
 另含：审查修复回归（贴墙防穿楼、Boss 逐级转阶段、完美闪避 0.26s 含端点、终焉真实时间门槛、升绫追击窗口、iPhone 安全区、HUD 数字不裁切）、创意加料、3D 模型/重型 AI/晶刺、配乐（缺省降级、模拟清单状态机、真实曲目循环点与小节线切换、Boss 版绯魇层、音量保存）。

@@ -1,3 +1,4 @@
 node_modules/
 tests/out/
 audio/_src/
+dist/
