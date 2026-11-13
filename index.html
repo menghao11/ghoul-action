@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#07030a">
+<title>赤骸夜行 · 原型</title>
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/addons/" } }
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="vignette"></div>
+<div id="btflash"></div>
+<div id="hud">
+  <div id="topleft">
+    <div class="who"><span id="heroName">凌夜</span><span id="typeName" class="tname">血绫·游龙</span></div>
+    <div class="bar hp"><i id="hpFill"></i><b id="hpText">100</b></div>
+    <div class="bar en"><i id="enFill"></i><b id="enText">血绫能量</b></div>
+    <div id="types"></div>
+  </div>
+  <div id="bossbar" class="hidden"><div class="bname" id="bossName"></div><div class="bar boss"><i id="bossFill"></i><i id="bossPoise"></i></div><div id="bossPhase"></div></div>
+  <div id="objective"></div>
+  <div id="combo" class="hidden"><b id="comboNum">0</b><span>连击</span><em id="moveName"></em></div>
+  <div id="awakenTimer" class="hidden"><span>绯魇</span><i id="awFill"></i></div>
+  <div id="topright">
+    <button id="btnQuality" class="sbtn">画质：中</button>
+    <button id="btnHelp" class="sbtn">操作</button>
+    <button id="btnPause" class="sbtn">暂停</button>
+  </div>
+  <div id="fps"></div>
+  <div id="lockmark" class="hidden"></div>
+  <div id="dmgLayer"></div>
+  <div id="banner"></div>
+</div>
+<div id="touch" class="hidden">
+  <div id="stickZone"><div id="stickBase"><div id="stickKnob"></div></div></div>
+  <div id="camZone"></div>
+  <div id="tbtns">
+    <button data-a="light" class="tb big" style="right:118px;bottom:26px">轻击</button>
+    <button data-a="heavy" class="tb" style="right:34px;bottom:96px">重击</button>
+    <button data-a="skill" class="tb" style="right:206px;bottom:30px">技能</button>
+    <button data-a="dodge" class="tb" style="right:30px;bottom:14px">闪避</button>
+    <button data-a="jump" class="tb" style="right:128px;bottom:126px">跳跃</button>
+    <button data-a="lock" class="tb sm" style="right:226px;bottom:116px">锁定</button>
+    <button data-a="switch" class="tb sm" style="right:40px;bottom:180px">切换</button>
+    <button data-a="ult" class="tb sm ult" style="right:126px;bottom:212px">绯魇</button>
+  </div>
+</div>
+<div id="overlay">
+  <div class="panel" id="helpPanel">
+    <h1>赤骸夜行</h1>
+    <p class="sub">夜樱区 · 第七横丁 —— 战斗原型</p>
+    <div class="cols">
+      <div><h3>键盘 + 鼠标</h3>
+        <p>WASD 移动 · 鼠标 转视角（点击画面锁定鼠标，Esc 释放）</p>
+        <p>左键 / J 轻击　右键 / K 重击　E / L 血绫技（磐盾：按住格挡）</p>
+        <p>空格 跳跃（可二段）　Shift 闪避　Q / 中键 锁定　Tab 切换目标</p>
+        <p>1–4 切换血绫　F 绯魇（能量满）·绯魇中再按 F：终焉</p>
+      </div>
+      <div><h3>触屏（横屏）</h3>
+        <p>左半屏 摇杆移动 · 右半屏 拖动转视角</p>
+        <p>右下按钮：轻击/重击/技能/闪避/跳跃/锁定/切换/绯魇</p>
+        <p>顶部 1–4 直接切换血绫</p>
+      </div>
+    </div>
+    <h3>连招</h3>
+    <p>轻×4 连斩 · 轻轻重 = 升绫（挑空）→ 跳跃追击 → 空中轻击 → 空中重击 坠星</p>
+    <p>闪避后马上攻击 = 闪反；敌人攻击前一瞬闪避 = 子弹时间（瞬影）</p>
+    <p>星屑 远程晶刺 · 磐盾 重击格挡 · 狂澜 爆发吸血 · 游龙 横扫突刺</p>
+    <button id="btnStart" class="big">开始</button>
+  </div>
+</div>
+<div id="rotate">请把手机横过来玩 ↻</div>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
