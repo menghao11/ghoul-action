@@ -114,7 +114,7 @@ export class Player {
   // 根据当前状态与缓冲输入选下一招
   tryAttack(canChain) {
     const I = this.w.input, buf = 0.3;
-    if (this.awake > 0 && I.consume('ult', buf) && this.awake < this.awakeMax - 0.8) { this.startMove('finisher'); this.awake = this.curMoves.finisher.dur + 0.15; return true; }
+    if (this.awake > 0 && !this.finisherUsed && I.consume('ult', buf) && this.awake < this.awakeMax - 0.8) { this.finisherUsed = true; this.startMove('finisher'); this.awake = this.curMoves.finisher.dur + 0.15; return true; }
     const sinceDodge = this.w.time - this.lastDodge;
     if (I.peek('skill', buf)) {
       I.consume('skill', buf); this.comboStep = 0;
@@ -198,7 +198,7 @@ export class Player {
   addEnergy(v) { if (this.awake > 0) return; this.energy = clamp(this.energy + v, 0, 100); }
   activateAwaken() {
     if (this.energy < 100 || this.awake > 0) return false;
-    this.energy = 0; this.awake = this.awakeMax; this.state = 'ult'; this.st = 0; this.move = null; this.iframe = 0.9;
+    this.energy = 0; this.awake = this.awakeMax; this.finisherUsed = false; this.state = 'ult'; this.st = 0; this.move = null; this.iframe = 0.9;
     this.armorParts.forEach((m) => (m.visible = true)); this.wrap.forEach((t) => { t.targetLen = 1; t.init = false; });
     this.w.onAwaken(); return true;
   }

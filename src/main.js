@@ -88,7 +88,7 @@ class World {
     document.getElementById('btnHelp').addEventListener('pointerdown', (e) => { e.stopPropagation(); ov.classList.remove('hidden'); this.paused = true; document.exitPointerLock?.(); document.getElementById('btnStart').textContent = this.started ? '继续' : '开始'; });
     document.getElementById('btnPause').addEventListener('pointerdown', (e) => { e.stopPropagation(); this.paused = !this.paused; e.target.textContent = this.paused ? '继续' : '暂停'; });
     document.getElementById('btnQuality').addEventListener('pointerdown', (e) => { e.stopPropagation(); const order = ['high', 'mid', 'low']; this.setQuality(order[(order.indexOf(this.quality) + 1) % 3]); });
-    addEventListener('pointerdown', () => this.sfx.unlock(), { once: false, passive: true });
+    for (const ev of ['pointerdown', 'touchend', 'click']) addEventListener(ev, () => this.sfx.unlock(), { passive: true }); // iOS 需在用户手势里解锁音频
     addEventListener('keydown', (e) => { this.sfx.unlock(); if (e.code === 'KeyP') { this.paused = !this.paused; } if (e.code === 'Backquote') document.getElementById('fps').classList.toggle('hidden'); });
     if (params.get('autostart') === '1') { ov.classList.add('hidden'); this.paused = false; }
     document.addEventListener('gesturestart', (e) => e.preventDefault());
