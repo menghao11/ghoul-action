@@ -17,6 +17,7 @@ import { Creative, FINISHER_VARIANTS, RANKS } from './creative.js';
 import { loadArtGlow } from './tendril.js';
 import { ArtFX } from './artfx.js';
 import { Music } from './music.js';
+import { makeGradePass } from './grade.js';
 import { preloadModels, Models, sceneBudget } from './models.js';
 
 const Q_LABEL = { high: '高', mid: '中', low: '低' };
@@ -67,12 +68,14 @@ class World {
     const dpr = q === 'high' ? Math.min(devicePixelRatio, 2) : q === 'mid' ? Math.min(devicePixelRatio, 1.5) : 1;
     r.setPixelRatio(dpr);
     if (this.composer) { this.composer.dispose?.(); this.composer = null; }
-    if (q !== 'low') {
+    {
       const rt = new THREE.WebGLRenderTarget(innerWidth * dpr, innerHeight * dpr, { type: THREE.HalfFloatType, samples: q === 'high' ? 4 : 0 });
       this.composer = new EffectComposer(r, rt); this.composer.setPixelRatio(dpr);
       this.composer.addPass(new RenderPass(this.scene, this.camera));
-      this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth * (q === 'high' ? 1 : 0.5), innerHeight * (q === 'high' ? 1 : 0.5)), 0.85, 0.55, 0.62);
-      this.composer.addPass(this.bloom); this.composer.addPass(new OutputPass());
+      this.bloom = null;
+      if (q !== 'low') { this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth * (q === 'high' ? 1 : 0.5), innerHeight * (q === 'high' ? 1 : 0.5)), 0.85, 0.55, 0.62); this.composer.addPass(this.bloom); }
+      this.grade = makeGradePass(); this.grade.uniforms.amount.value = this.gradeAmt || 0; this.composer.addPass(this.grade);
+      this.composer.addPass(new OutputPass());
     }
     document.getElementById('btnQuality').textContent = '画质：' + Q_LABEL[q];
     this.resize();
@@ -203,6 +206,7 @@ class World {
       this.hitstop(maxHs * (pl.awake > 0 ? 1.15 : 1));
       if (hd.launch && first) { pl.chaseT = (hd.up || 10) / 15 + 0.45; pl.target = first; } // 由挑空初速推导：到顶点(up/g_juggle)后再留 0.45s
       if (move.finisher) this.stats.finishers++;
+      if (hd.pierce && first) this.pierceSlow(first);
     }
     return any;
   }
@@ -221,6 +225,15 @@ class World {
   impact(pos, r) {
     const n = this.city.shortOut(pos, r, (g) => { for (let k = 0; k < 14; k++) this.fx.spark.emit(g.x + (Math.random() - 0.5) * 0.6, g.y - 0.4, g.z, (Math.random() - 0.5) * 2.5, Math.random() * 1.5, (Math.random() - 0.5) * 2.5, { r: 1, g: 0.7 + Math.random() * 0.3, b: 0.3, size: 0.05 + Math.random() * 0.04, life: 0.6 + Math.random() * 0.6, drag: 0.6, grav: 9 }); });
     if (n) this.stats.signsShorted = (this.stats.signsShorted || 0) + n; return n;
+  }
+  // 刺穿慢放：突刺类招式命中 → 短暂慢动作 + 轻微推近（无频闪、无晃屏、不弹横幅）
+  pierceSlow(e) {
+    if (this.realTime - (this._pierceAt ?? -9) < 0.6) return false;
+    this._pierceAt = this.realTime; this.stats.pierces = (this.stats.pierces || 0) + 1;
+    this.btScale = this.btT > 0 ? Math.min(this.btScale, 0.3) : 0.3; this.btT = Math.max(this.btT, 0.28);
+    this.cam.push(0.16, 0.1, 0.16, 0.32);
+    this.artfx?.flash('glint', new THREE.Vector3(e.pos.x, e.pos.y + 1.2, e.pos.z), 1.4);
+    return true;
   }
   hitstop(s) { this.hitstopT = Math.max(this.hitstopT, Math.min(0.35, s)); }
   bulletTime(dur, scale = 0.2) {
@@ -311,6 +324,11 @@ class World {
     if (this.player.awake > 0) this.fx.aura(this.player.pos, 1);
     this.playerBlob.position.set(this.player.pos.x, 0.03, this.player.pos.z);
     this.cam.update(realDt, this.player);
+    { // 绯魇调色：目标强度平滑逼近（约 0.6s 渐入、1s 渐出），无频闪
+      const want = this.gradeForce ?? (this.player.awake > 0 ? 0.9 : this.btT > 0 ? 0.3 : 0);
+      const g = this.gradeAmt || 0; this.gradeAmt = g + (want - g) * (1 - Math.exp(-(want > g ? 4 : 2.5) * realDt));
+      if (Math.abs(this.gradeAmt - want) < 0.001) this.gradeAmt = want;
+    }
     this.fill.position.copy(this.camera.position).add(new THREE.Vector3(0, 3, 0)); this.fill.target.position.copy(this.cam.focus);
     this.rim.position.set(this.player.pos.x, this.player.pos.y + 2.6, this.player.pos.z); this.rim.intensity = this.player.awake > 0 ? 8 : 3;
     this.creative.update(realDt); this.music.update(this);
@@ -320,7 +338,8 @@ class World {
     if (this.camLog) { const c = this.camera; this.camLog.push([c.position.x, c.position.y, c.position.z, c.quaternion.x, c.quaternion.y, c.quaternion.z, c.quaternion.w, c.fov, c.up.x, c.up.y, c.up.z, realDt, this.hitstopT > 0 ? 1 : 0, this.cam.dbg ? this.cam.dbg.slice() : null, this.player.pos.x, this.player.pos.z, this.cam.lockTarget ? this.cam.lockTarget.id : -1, this.player.moveId]); }
     this.started = true;
   }
-  render() { if (this.composer) this.composer.render(); else this.renderer.render(this.scene, this.camera); }
+  // 低画质：只有调色生效时才走后期链，平时直接渲染（省性能）
+  render() { if (this.grade) this.grade.uniforms.amount.value = this.gradeAmt || 0; const useComp = this.composer && (this.bloom || (this.gradeAmt || 0) > 0.002); if (useComp) this.composer.render(); else this.renderer.render(this.scene, this.camera); }
 }
 
 // 先加载画图王的 3D 角色（失败/缺失时自动用占位模型）
@@ -344,6 +363,15 @@ window.__dbg = {
   clearEnemies() { for (const e of world.enemies) e.remove(); world.enemies = []; world.tokens.clear(); },
   wave(n) { this.clearEnemies(); world.wave = n - 1; world.waveT = 0; world.nextWave(); },
   noWaves(b = true) { world._noWaves = b; if (b) world.updateWaves = () => {}; },
+  // 读当前画面像素统计（同一任务内渲染后立刻 readPixels）：平均饱和度、非红像素饱和度、红占比、亮度
+  pixelStats() {
+    world.render(); const gl = world.renderer.getContext(); const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
+    const px = new Uint8Array(W * H * 4); gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    let n = 0, sat = 0, satNR = 0, nNR = 0, lum = 0, redShare = 0, rr = 0, gg = 0, bb = 0;
+    for (let i = 0; i < px.length; i += 4 * 7) { const r = px[i] / 255, g = px[i + 1] / 255, b = px[i + 2] / 255; const mx = Math.max(r, g, b), mn = Math.min(r, g, b); const s = mx > 0.02 ? (mx - mn) / mx : 0;
+      n++; sat += s; lum += 0.2126 * r + 0.7152 * g + 0.0722 * b; rr += r; gg += g; bb += b; if (!(r > g * 1.3 && r > b * 1.3)) { satNR += s; nNR++; } }
+    return { sat: sat / n, satNonRed: satNR / Math.max(1, nNR), lum: lum / n, rgb: [rr / n, gg / n, bb / n], redRatio: rr / Math.max(1e-6, gg + bb) * 2, grade: world.gradeAmt, composer: !!world.composer };
+  },
   teleport(x, z) { world.player.pos.set(x, 0, z); world.cam.snap(world.player); },
   start() { document.getElementById('overlay').classList.add('hidden'); world.paused = false; },
   boss() { return world.enemies.find((e) => e.isBoss); },

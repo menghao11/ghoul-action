@@ -197,11 +197,11 @@ const frameShot = async (p, name) => { await p.evaluate(() => new Promise((r) =>
     const ctxA = await b.newContext({ viewport: { width: 800, height: 450 } }); const pa = await ctxA.newPage(); const eA = [];
     pa.on('pageerror', (e) => eA.push(e.message));
     const png = fs.readFileSync(path.join(SHOTS, '01_start.png'));
-    await pa.route('**/art/MANIFEST.md', (r) => r.fulfill({ status: 200, contentType: 'text/markdown', body: '# test\n- textures/tendril_glow_ranged.png 星屑\n- textures/glow_awaken.png\n' }));
+    await pa.route('**/art/manifest.json', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ files: ['textures/tendril_glow_ranged.png', 'textures/glow_awaken.png'] }) }));
     await pa.route('**/art/textures/*.png', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: png }));
     await pa.goto(BASE + '?autostart=1&nolock=1'); await pa.waitForFunction(() => window.__artGlow !== undefined, null, { timeout: 90000 });
     const ag = await pa.evaluate(() => window.__artGlow);
-    check('美术辉光贴图：art/MANIFEST.md 中的 glow 贴图按类型自动加载（缺省回退程序贴图）', ag.length === 2 && ag.some((x) => x.kind === 'ranged') && ag.some((x) => x.kind === 'awaken') && eA.length === 0, { ag, eA });
+    check('美术辉光贴图：art/manifest.json 中的 glow 贴图按类型自动加载（缺省回退程序贴图）', ag.length === 2 && ag.some((x) => x.kind === 'ranged') && ag.some((x) => x.kind === 'awaken') && eA.length === 0, { ag, eA });
     await ctxA.close();
   }
 
@@ -251,6 +251,44 @@ const frameShot = async (p, name) => { await p.evaluate(() => new Promise((r) =>
     check('升绫追击窗口由挑空初速推导，覆盖顶点之后', r.toApex && r.chase && r.chase > r.toApex + 0.2, r);
   }
 
+  // ================= 审核王 650e558 复测：处决推进 / 刺穿慢放 / 绯魇调色 =================
+  // 处决（终焉）推进镜头：curDist 真的变小；缓入段单调减、保持段不变、缓出段单调增；只有一次"进"和一次"出"
+  {
+    await p.evaluate(() => { __dbg.clearEnemies(); __world.cam.lockTarget = null; __dbg.setType(3); __dbg.teleport(-10, 0); __world.cam.yaw = -Math.PI / 2; __world.cam.snap(__world.player); __dbg.spawn('grunt', -8.5, 0); __world.player.awake = 0; __world.btT = 0; });
+    await sim(p, 120, `W.enemies.forEach(e=>{e.cool=99;});`);
+    const r = await p.evaluate(() => { const C = __world.cam; __dbg.fillEnergy(); __dbg.press('ult'); for (let i = 0; i < 60; i++) { __world.enemies.forEach((e) => { e.cool = 99; }); __world.step(1 / 60); }
+      const d0 = C.curDist; C.pushLog = []; __dbg.press('ult'); for (let i = 0; i < 300; i++) { __world.enemies.forEach((e) => { e.cool = 99; }); if (i % 2 === 0 && __world.player.moveId !== 'finisher' && !__world.player.finisherUsed) __dbg.press('ult'); __world.step(1 / 60); }
+      const L = C.pushLog; C.pushLog = null; const seg = { in: [], hold: [], out: [] }; L.forEach((x) => { if (seg[x[2]]) seg[x[2]].push(x[0]); });
+      const mono = (a, dir) => a.every((v, i) => i === 0 || (dir < 0 ? v <= a[i - 1] + 1e-9 : dir > 0 ? v >= a[i - 1] - 1e-9 : Math.abs(v - a[i - 1]) < 1e-6));
+      let rev = 0, last = 0; for (let i = 1; i < L.length; i++) { const dd = L[i][0] - L[i - 1][0]; if (Math.abs(dd) < 1e-7) continue; const sg = Math.sign(dd); if (last && sg !== last) rev++; last = sg; }
+      const phases = []; L.forEach((x) => { if (phases[phases.length - 1] !== x[2]) phases.push(x[2]); });
+      return { d0: +d0.toFixed(3), min: +Math.min(...L.map((x) => x[0])).toFixed(3), end: +L[L.length - 1][0].toFixed(3), inN: seg.in.length, holdN: seg.hold.length, outN: seg.out.length, inMono: mono(seg.in, -1), holdFlat: mono(seg.hold, 0), outMono: mono(seg.out, 1), reversals: rev, phases: phases.join('>'), fov: __world.camera.fov, execPush: __world.stats.execPush }; });
+    check('处决推进镜头：终焉时 curDist 真的拉近（≥20%），缓入单调减 → 保持 → 缓出单调增，零振荡（仅 1 次转向）', r.execPush >= 1 && r.min < r.d0 * 0.8 && r.inN > 10 && r.holdN > 10 && r.outN > 10 && r.inMono && r.holdFlat && r.outMono && r.reversals <= 1 && /^(none>)?in>hold>out/.test(r.phases) && Math.abs(r.end - r.d0) < 0.05, r);
+  }
+  // 刺穿慢放：游龙 突刺（L3）与 贯龙（H）命中 → 短暂慢动作 + 推近；普通横扫不触发
+  {
+    const one = (mv) => p.evaluate((mv) => { __dbg.clearEnemies(); __world.cam.lockTarget = null; __dbg.setType(3); __dbg.teleport(-10, 0); __world.cam.snap(__world.player); __world.player.awake = 0; __world.btT = 0; __world._pierceAt = -9; for (let i = 0; i < 60; i++) __world.step(1 / 60);
+      const e = __world.spawn('grunt', -8.2, 0); for (let i = 0; i < 40; i++) { e.cool = 99; __world.step(1 / 60); } __world.player.yaw = Math.atan2(e.pos.x - __world.player.pos.x, e.pos.z - __world.player.pos.z);
+      const p0 = __world.stats.pierces || 0; const C = __world.cam; C.pushLog = []; __world.player.startMove(mv); let minTs = 1, minK = 1; for (let i = 0; i < 90; i++) { e.cool = 99; __world.step(1 / 60); minTs = Math.min(minTs, __world.enemyTimeScale); minK = Math.min(minK, C.pushK); }
+      const L = C.pushLog; C.pushLog = null; return { mv, pierces: (__world.stats.pierces || 0) - p0, minTimeScale: +minTs.toFixed(3), minPushK: +minK.toFixed(3), hp: e.hp, maxHp: e.maxHp, phases: [...new Set(L.map((x) => x[2]))].join(',') }; }, mv);
+    const rL3 = await one('L3'), rH = await one('H'), rL1 = await one('L1');
+    check('刺穿慢放：游龙 突刺/重击命中触发短暂慢动作（敌方时间 <0.6）+ 镜头推近；横扫不触发', rL3.pierces === 1 && rH.pierces === 1 && rL3.minTimeScale < 0.6 && rH.minTimeScale < 0.6 && rL3.minPushK < 0.95 && rH.minPushK < 0.95 && rL1.pierces === 0 && rL1.minPushK === 1, { rL3, rH, rL1 });
+  }
+  // 绯魇调色：全屏后期。同一画面开/关调色比较像素：非红像素去饱和、整体偏红、不压成全黑；渐入渐出单调（无频闪）
+  {
+    await p.evaluate(() => { __dbg.clearEnemies(); __world.cam.lockTarget = null; __dbg.teleport(-10, 0); __world.cam.yaw = -Math.PI / 2; __world.cam.snap(__world.player); __world.player.awake = 0; __world.btT = 0; for (let i = 0; i < 120; i++) __world.step(1 / 60); });
+    const before = await p.evaluate(() => __dbg.pixelStats());
+    const r = await p.evaluate(() => { const ramp = []; __dbg.fillEnergy(); __dbg.press('ult'); for (let i = 0; i < 120; i++) { __world.step(1 / 60); ramp.push(__world.gradeAmt); } const up = ramp.every((v, i) => i === 0 || v >= ramp[i - 1] - 1e-9); return { up, peak: +ramp[ramp.length - 1].toFixed(3) }; });
+    const awakeOn = await p.evaluate(() => __dbg.pixelStats());
+    const awakeOff = await p.evaluate(() => { const g = __world.gradeAmt; __world.gradeAmt = 0; const s = __dbg.pixelStats(); __world.gradeAmt = g; return s; });
+    await frameShot(p, '14_feiyan_grade.png');
+    const fall = await p.evaluate(() => { __world.player.awake = 0.01; const ramp = []; for (let i = 0; i < 180; i++) { __world.step(1 / 60); ramp.push(__world.gradeAmt); } return { down: ramp.every((v, i) => i === 0 || v <= ramp[i - 1] + 1e-9), end: ramp[ramp.length - 1], maxStep: Math.max(...ramp.slice(1).map((v, i) => Math.abs(v - ramp[i]))) }; });
+    const low = await p.evaluate(() => { __world.setQuality('low'); __world.gradeAmt = 0; const a = __dbg.pixelStats(); __world.gradeAmt = 0.9; const b = __dbg.pixelStats(); __world.gradeAmt = 0; __world.setQuality('high'); return { off: a.satNonRed, on: b.satNonRed }; });
+    const fmt = (s) => ({ sat: +s.sat.toFixed(3), satNonRed: +s.satNonRed.toFixed(3), lum: +s.lum.toFixed(3), redRatio: +s.redRatio.toFixed(3), grade: +s.grade.toFixed(2) });
+    check('绯魇调色：全屏调色 pass（非红去饱和、偏红黑、不压全黑），渐入/渐出单调无频闪，低画质也生效', r.up && r.peak > 0.85 && awakeOn.satNonRed < awakeOff.satNonRed * 0.6 && awakeOn.redRatio > awakeOff.redRatio * 1.05 && awakeOn.lum > awakeOff.lum * 0.45 && fall.down && fall.end < 0.01 && fall.maxStep < 0.05 && low.on < low.off * 0.6,
+      { before: fmt(before), awakeGradeOff: fmt(awakeOff), awakeGradeOn: fmt(awakeOn), rampUp: r, fall: { down: fall.down, maxStep: +fall.maxStep.toFixed(4) }, low });
+  }
+
   // ================= 配乐管理器（模拟声音王的 audio/MANIFEST.md）=================
   {
     { const cA = await b.newContext({ viewport: { width: 640, height: 360 } }); const pA = await cA.newPage(); const eA = []; pA.on('pageerror', (e) => eA.push(e.message));
@@ -275,6 +313,9 @@ const frameShot = async (p, name) => { await p.evaluate(() => new Promise((r) =>
       check('真实配乐：循环点按采样数显式设置（battle loopEnd = 2116800/44100）', loopOk, { voice: mb.voice, ext: await pR.evaluate(() => __world.music.ext()[0]) });
       check('真实配乐：Boss 三阶段在小节线（1.6s 网格）切到 b，同偏移接续，等待 ≤1.6s', p3b.playing === 'phase3' && ls.from === 'boss' && onBar && wait >= 0 && wait <= 1.65, { playing: p3b.playing, lastSwitch: ls, waitSec: +wait.toFixed(3) });
       check('真实配乐：Boss 战用 layer_feiyan_boss，在 Boss 曲小节线进入；拍相位可供 VFX', lsOk && p3b.beat && p3b.beat.phase >= 0 && p3b.beat.phase < 1 && eR.length === 0, { layerSlot: lb2.layerSlot, layerStart: lb2.layerStart, beat: p3b.beat, eR });
+      // 战败：当前曲目闷声淡出到静音，不再放探索曲
+      await pR.evaluate(() => { __dbg.god(false); const P = __world.player; P.hp = 0; P.alive = false; P.state = 'dead'; __world.onPlayerDead(); }); await stR(60); await sleep(3600); const df = await pR.evaluate(() => __dbg.music());
+      check('战败配乐：不播探索曲，战斗/Boss 曲低通淡出到静音', df.want === 'defeat' && df.playing === null && df.lastSwitch && df.lastSwitch.slot === 'defeat' && df.lastSwitch.from === 'phase3' && df.lowpass && !df.layer, { want: df.want, playing: df.playing, lastSwitch: df.lastSwitch, lowpass: df.lowpass });
       await cR.close(); }
     const wav = (freq, sec = 3, sr = 22050) => { const n = sr * sec, b = Buffer.alloc(44 + n * 2); b.write('RIFF', 0); b.writeUInt32LE(36 + n * 2, 4); b.write('WAVEfmt ', 8); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(sr, 24); b.writeUInt32LE(sr * 2, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write('data', 36); b.writeUInt32LE(n * 2, 40); for (let i = 0; i < n; i++) b.writeInt16LE(Math.round(Math.sin(i / sr * freq * 6.283) * 6000), 44 + i * 2); return b; };
     const ctxM = await b.newContext({ viewport: { width: 800, height: 450 } }); const pm = await ctxM.newPage(); const eM = [];
@@ -395,6 +436,25 @@ const frameShot = async (p, name) => { await p.evaluate(() => new Promise((r) =>
   await ip.p.evaluate(() => { clearInterval(window.__auto); __dbg.setQuality('mid'); try { localStorage.removeItem('ghoul_quality'); } catch (e) {} });
   check('iPhone: 全程无页面错误', ip.errs.length === 0, ip.errs.slice(0, 5));
   await ip.ctx.close();
+  // ================= 干净导出：git archive HEAD 放到子路径 /ghoul-action/ 下运行（模拟 GitHub Pages）=================
+  {
+    const { execSync, spawn } = require('child_process'); const os = require('os');
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ghoul-export-')); const dir = path.join(root, 'ghoul-action'); fs.mkdirSync(dir);
+    const repo = path.join(__dirname, '..'); const head = execSync('git rev-parse --short HEAD', { cwd: repo }).toString().trim();
+    execSync(`git archive HEAD | tar -x -C "${dir}"`, { cwd: repo, shell: '/bin/bash' });
+    const port = 8799; const srv = spawn('python3', ['-m', 'http.server', String(port), '--bind', '127.0.0.1'], { cwd: root, stdio: 'ignore' }); await sleep(1200);
+    const cE = await b.newContext({ viewport: { width: 1024, height: 576 } }); const pE = await cE.newPage(); const bad = [], cerr = [], reqs = new Set();
+    pE.on('response', (r) => { reqs.add(r.url()); if (r.status() >= 400) bad.push(r.status() + ' ' + r.url()); });
+    pE.on('requestfailed', (r) => bad.push('failed ' + r.url())); pE.on('pageerror', (e) => cerr.push('pageerror: ' + e.message)); pE.on('console', (m) => { if (m.type() === 'error') cerr.push(m.text()); });
+    await pE.goto(`http://127.0.0.1:${port}/ghoul-action/?autostart=1&nolock=1`); await pE.waitForFunction(() => window.__dbg && window.__dbg.ready, null, { timeout: 60000 });
+    await pE.mouse.click(500, 300); await pE.waitForFunction(() => window.__artGlow !== undefined && __dbg.music().decoded.length >= 7, null, { timeout: 90000 }).catch(() => {});
+    await pE.evaluate(() => { __dbg.god(true); __dbg.fillEnergy(); __dbg.press('ult'); }); await sleep(3000);
+    const info = await pE.evaluate(() => ({ glow: window.__artGlow, models: __dbg.models().ok ?? __dbg.models(), music: __dbg.music().status, decoded: __dbg.music().decoded.length, build: document.querySelector('meta[name=build]')?.content }));
+    srv.kill(); await cE.close(); try { fs.rmSync(root, { recursive: true, force: true }); } catch (e) {}
+    const urls = [...reqs]; const outside = urls.filter((u) => !/^(blob|data):/.test(u) && !u.includes(`/ghoul-action/`));
+    check('干净导出（git archive HEAD，子路径 /ghoul-action/）：零 404/失败请求、零控制台错误，manifest/模型/配乐都能加载', bad.length === 0 && cerr.length === 0 && outside.length === 0 && info.glow && info.glow.length >= 1 && info.decoded >= 7 && urls.some((u) => /art\/manifest\.json/.test(u)),
+      { head, requests: urls.length, bad, consoleErrors: cerr.slice(0, 5), outside: outside.slice(0, 3), glow: info.glow, decoded: info.decoded, music: info.music, build: info.build });
+  }
   await b.close();
   const pass = results.filter((r) => r.pass).length;
   console.log(`\n${pass}/${results.length} passed`);

@@ -113,7 +113,7 @@ export class Player {
     if (m.guard) { this.state = 'guard'; this.guardT = 0; }
     if (!m.air && !m.hang) { this.vel.x *= 0.2; this.vel.z *= 0.2; }
     if (m.slam) { this.vel.set(0, -4, 0); }
-    if (m.finisher) { this.vel.set(0, 6, 0); this.w.bulletTime(1.8, 0.15); }
+    if (m.finisher) { this.vel.set(0, 6, 0); this.w.bulletTime(1.8, 0.15); this.w.cam.push(0.32, 0.45, 1.3, 0.8); this.w.stats.execPush = (this.w.stats.execPush || 0) + 1; }
     if (m.finisher) this.w.hud.banner(FINISHER_VARIANTS[this.type].name, '', 1.6);
     const nm = m.finisher ? FINISHER_VARIANTS[this.type].name : MOVE_NAMES[m.name] || (id.startsWith('L') ? MOVE_NAMES.L : id.startsWith('air') ? MOVE_NAMES.airL : '');
     if (nm) this.w.hud.moveName(nm);

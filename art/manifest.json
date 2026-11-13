@@ -1,0 +1,6 @@
+{
+  "note": "运行时清单（游戏启动时读取）。只列游戏实际用到的贴图；美术原始说明不随网页发布。",
+  "tendrilGlow": {
+    "heavy": "fx/kagune_scales_emissive_512.png"
+  }
+}

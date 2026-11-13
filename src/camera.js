@@ -16,7 +16,19 @@ export class CameraRig {
     this.sens = 0.0042; this.lockTarget = null; this.FOV = camera.fov;
     this._look = new THREE.Vector3(); this._lv = { x: 0, y: 0, z: 0 }; this.lookPt = new THREE.Vector3();
     this.manualT = 0;
+    this.pushS = null; this.pushK = 1; this.pushLog = null; this.baseDist = 6.2;
   }
+  // 处决/刺穿推进：只改相机到焦点的距离（不动 FOV、不加任何随机偏移）。
+  // 包络 = 缓入(平滑单调) → 保持 → 缓出(平滑单调)，用真实时间推进；进行中只允许延长保持，绝不反向抖动。
+  push(amt, tin = 0.4, hold = 1.0, tout = 0.7) {
+    const P = this.pushS;
+    if (P) { // 已在推进：缓入/保持阶段只延长保持；缓出阶段不打断（避免来回）
+      if (P.t < P.tin + P.hold) { P.hold = Math.max(P.hold, P.t - P.tin + hold); P.tout = Math.max(P.tout, tout); return false; }
+      return false;
+    }
+    this.pushS = { amt: Math.min(0.45, amt), tin, hold, tout, t: 0, base: this.baseDist }; return true;
+  }
+  pushPhase() { const P = this.pushS; if (!P) return 'none'; return P.t < P.tin ? 'in' : P.t < P.tin + P.hold ? 'hold' : 'out'; }
   input(dx, dy, touch) {
     const s = this.sens * (touch ? 0.9 : 1);
     if (Math.abs(dx) + Math.abs(dy) > 0) this.manualT = 0.8;
@@ -60,10 +72,21 @@ export class CameraRig {
     if (diry < 0) maxD = Math.min(maxD, (this.focus.y - 0.3) / -diry);
     const wallD = Math.max(1.6, maxD); maxD = Math.max(1.6, Math.min(dist, maxD));
     this.preD += (maxD - this.preD) * (1 - Math.exp(-(maxD < this.preD ? 20 : 6) * dt));
-    this.curDist = smoothDamp(this.curDist, this.preD, this.fv, 'd', maxD < this.curDist ? 0.1 : 0.35, dt);
+    const P = this.pushS;
+    if (!P) this.baseDist = smoothDamp(this.baseDist, this.preD, this.fv, 'd', maxD < this.baseDist ? 0.1 : 0.35, dt);
+    else { this.baseDist = Math.min(P.base, wallD); this.fv.d = 0; } // 推进期间冻结基础距离，保证每段严格单调
     // 防穿楼：拉近是"立即"的（硬约束，当帧生效，不经平滑，不会穿进墙），只有松开后的拉远才平滑
     // 只对"墙/地面"硬约束；期望距离本身的变化（解锁、换目标）仍然平滑
-    if (this.curDist > wallD) { this.curDist = wallD; if (this.fv.d > 0) this.fv.d = 0; }
+    if (this.baseDist > wallD) { this.baseDist = wallD; if (this.fv.d > 0) this.fv.d = 0; }
+    let pk = 1;
+    if (P) {
+      P.t += dt; const ss = (x) => { x = Math.min(1, Math.max(0, x)); return x * x * x * (x * (x * 6 - 15) + 10); };
+      const e = P.t < P.tin ? ss(P.t / P.tin) : P.t < P.tin + P.hold ? 1 : 1 - ss((P.t - P.tin - P.hold) / P.tout);
+      pk = 1 - P.amt * e;
+      if (P.t >= P.tin + P.hold + P.tout) { this.pushS = null; pk = 1; this.preD = this.baseDist; }
+    }
+    this.pushK = pk; this.curDist = this.baseDist * pk;
+    if (this.pushLog) this.pushLog.push([this.curDist, k, this.pushPhase(), this.baseDist]);
     if (this.preD > wallD) this.preD = wallD;
     this.dbg = [maxD, this.curDist, dist];
     const c = this.cam;
@@ -71,6 +94,6 @@ export class CameraRig {
     c.lookAt(this.focus.x, this.focus.y, this.focus.z);
     c.fov = this.FOV; // 固定 FOV，绝不做 FOV 冲击
   }
-  snap(player) { this.focus.set(player.pos.x, 1.45, player.pos.z); this.pre.copy(this.focus); this.fv = { x: 0, y: 0, z: 0, d: 0 }; this.yv = { yaw: 0, pitch: 0 }; this.wantYaw = undefined; }
+  snap(player) { this.focus.set(player.pos.x, 1.45, player.pos.z); this.pre.copy(this.focus); this.fv = { x: 0, y: 0, z: 0, d: 0 }; this.yv = { yaw: 0, pitch: 0 }; this.wantYaw = undefined; this.pushS = null; this.pushK = 1; }
 }
 export { angDiff };

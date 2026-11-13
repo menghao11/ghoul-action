@@ -25,24 +25,24 @@ export function setGlowTexture(kind, tex) {
   tex.colorSpace = THREE.SRGBColorSpace; if (!tex.isCanvasTexture) tex.wrapS = tex.wrapT = THREE.RepeatWrapping; GLOW[kind] = tex;
   for (const m of REG) if (kind === '*' ? !GLOW[m.userData.kind] || m.userData.kind === '*' : m.userData.kind === kind) { m.emissiveMap = tex; m.needsUpdate = true; }
 }
-// 读取 art/MANIFEST.md（或 art/manifest.json）里列出的发光贴图；文件名含 glow 即可，含类型关键词则只用于该形态
+// 读取 art/manifest.json 里列出的血绫发光贴图；tendrilGlow 按形态指定，files 里文件名含类型关键词则只用于该形态
 const KIND_KEYS = { ranged: ['ranged', '星屑', 'shard', 'crystal'], heavy: ['heavy', '磐盾', 'shield'], burst: ['burst', '狂澜'], balanced: ['balanced', '游龙', 'tail'], awaken: ['awaken', '绯魇', 'wrap'] };
 export async function loadArtGlow(base = 'art/') {
-  const found = [];
-  // 只读固定位置的清单（GitHub Pages 没有目录列表）：art/MANIFEST.md、art/manifest.json、art/textures/MANIFEST.md、art/models/MANIFEST.md
-  for (const f of ['MANIFEST.md']) {
-    const dir = f.includes('/') ? f.slice(0, f.lastIndexOf('/') + 1) : '';
-    try { const r = await fetch(base + f, { cache: 'no-cache' }); if (!r.ok) continue; const txt = await r.text();
-      const re = /([\w\-./\u4e00-\u9fa5]*glow[\w\-./\u4e00-\u9fa5]*\.(?:png|webp|jpg|jpeg))/gi; let mm;
-      while ((mm = re.exec(txt))) { const n = mm[1].replace(/^(\.\/)?(art\/)?/, ''); found.push(n.includes('/') ? n : dir + n); }
-    } catch (e) { /* 没有美术资源时静默使用程序贴图 */ }
-  }
+  const found = []; const forced = {};
+  // 只读入库的运行时清单 art/manifest.json（GitHub Pages 没有目录列表）。
+  // 格式：{ "tendrilGlow": { "heavy": "fx/xxx.png", ... } } 或 { "files": ["textures/tendril_glow_ranged.png", ...] }
+  try { const r = await fetch(base + 'manifest.json', { cache: 'no-cache' });
+    if (r.ok) { const j = await r.json();
+      for (const [k, f] of Object.entries(j.tendrilGlow || {})) { found.push(f); forced[f] = k; }
+      for (const f of j.files || []) if (/glow/i.test(f)) found.push(f);
+    }
+  } catch (e) { /* 没有清单时静默使用程序贴图 */ }
   const loader = new THREE.TextureLoader(); const done = [];
   for (const rel of [...new Set(found)]) {
     const url = /^https?:/.test(rel) ? rel : base + rel.replace(/^\//, "").replace(/^(\.\/)?(art\/)?/, '');
-    const low = rel.toLowerCase(); let kind = '*';
-    if (!/tendril|kagune|血绫/.test(low) && !Object.values(KIND_KEYS).flat().some((w) => low.includes(w))) continue; // 只要血绫用的发光贴图（通用辉光精灵等交给 artfx.js）
-    for (const [k, keys] of Object.entries(KIND_KEYS)) if (keys.some((w) => low.includes(w))) kind = k;
+    const low = rel.toLowerCase(); let kind = forced[rel] || '*';
+    if (!forced[rel] && !/tendril|kagune|血绫/.test(low) && !Object.values(KIND_KEYS).flat().some((w) => low.includes(w))) continue; // 只要血绫用的发光贴图（通用辉光精灵等交给 artfx.js）
+    if (!forced[rel]) for (const [k, keys] of Object.entries(KIND_KEYS)) if (keys.some((w) => low.includes(w))) kind = k;
     try { const tex = await loader.loadAsync(url); setGlowTexture(kind, tex); done.push({ url, kind }); } catch (e) { console.warn('glow texture failed', url); }
   }
   return done;

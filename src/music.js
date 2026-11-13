@@ -135,13 +135,13 @@ export class Music {
     const now = w.realTime; const boss = w.enemies.find((e) => e.isBoss && e.alive);
     const fighting = w.enemies.some((e) => e.alive && !e.isBoss); if (fighting || boss) this.lastBattle = now;
     let want = 'explore';
-    if (w.over) want = w.player.alive ? 'victory' : 'explore';
+    if (w.over) want = w.player.alive ? 'victory' : 'defeat'; // 战败：当前曲目闷声淡出到静音
     else if (boss) want = boss.phase >= 3 ? 'phase3' : 'boss';
     else if (fighting || now - this.lastBattle < 3) want = 'battle';
     if (want !== this.want) { this.want = want; this.history.push(want); }
     const layer = w.player.awake > 0 && !w.over; if (layer !== this.layerOn) { this.layerOn = layer; this.history.push(layer ? '+awaken' : '-awaken'); }
     // 子弹时间：音乐整体低通（"水下"感），平滑过渡，不做音量抖动
-    this.btLP = w.btT > 0 || w.enemyTimeScale < 0.6;
+    this.btLP = w.btT > 0 || w.enemyTimeScale < 0.6 || want === 'defeat';
     if (!this.ctx) return; const t = this.ctx.currentTime;
     this.lp.frequency.setTargetAtTime(this.btLP ? 650 : 20000, t, this.btLP ? 0.06 : 0.25);
     if (this.cur !== this.want) this.switchTo(this.want);
@@ -173,6 +173,7 @@ export class Music {
   async switchTo(want) {
     this.cur = want; const c = this.ctx; if (!c) return;
     await this.manifestP; if (this.cur !== want) return; // 清单还没读完时先等它，避免误判"没有这首"
+    if (want === 'defeat') { const old = this.voices.main, now = c.currentTime; if (old) this._fade(old, 0, 2.8, now); this.voices.main = null; this.lastSwitch = { slot: 'defeat', from: old ? old.slot : null, at: now, decidedAt: now, offset: 0 }; return; }
     const slot = this.resolve(want); // 缺某首时退回相近的曲目（三阶段→Boss→战斗→探索）
     if (slot && this.voices.main && this.voices.main.slot === slot) return;
     const b = slot ? await this.decode(slot) : null; if (this.cur !== want) return;

@@ -78,6 +78,9 @@ python3 -m http.server 8792 --bind 127.0.0.1
 - **血晶花**：终焉最后一击和 Boss 倒下处绽放发光的血晶簇，几秒后缓慢收拢消失。
 - **处决碎面具**：敌人死亡时面具碎片飞散、落地、淡出（模型版按面具颜色：瓷白骷髅/红鸦喙/铁枷）。
 - **霓虹短路**：重击、砸地、终焉的冲击波让附近招牌暗下、落下火花、再缓慢复燃（不闪烁）。
+- **处决推进镜头**：放「终焉」时镜头沿视线平滑推近约 32%（缓入 0.45s → 保持 → 缓出 0.8s），只改距离，FOV 不变；每段单调，零振荡。
+- **刺穿慢放**：游龙 突刺（第 3 段轻击）和 贯龙（重击）命中时，敌方时间降到 0.3 倍约 0.3 秒，同时镜头轻推近；0.6 秒冷却，不弹横幅、不闪屏。
+- **绯魇调色**：全屏后期 pass（Bloom 之后），红色保留，其它颜色去饱和并偏向红黑，暗部柔和下压；约 0.6s 渐入、1s 渐出，无频闪。低画质也生效（仅在调色时启用后期链）。
 - **配乐节拍辉光**：血绫辉光随音乐拍点做很小的余弦起伏（`world.music.musicBeatPhase`）。
 
 ## 3D 角色（画图王）
@@ -90,12 +93,14 @@ python3 -m http.server 8792 --bind 127.0.0.1
 ## 配乐（声音王）
 - `audio/MANIFEST.md` + OGG/M4A（Safari 用 M4A，其它按 `canPlayType`）。Web Audio `AudioBufferSourceNode` 循环，`loopEnd = 母带采样数 / 44100` 显式设置（M4A 尾部补零不影响）。
 - 按局势交叉淡入淡出：探索 → 战斗 → Boss → 三阶段 → 胜利短曲（一次性）。Boss a→b：取 a 当前位置向上取整到下一小节线（1.6 s），b 从同一偏移开始，0.4 s 交叉。
+- 战败：不再播探索曲，当前曲目低通后 2.8 秒淡出到静音。
 - 绯魇叠加层：杂兵战用 `layer_feiyan`（战斗曲小节线进入），Boss 战用 `layer_feiyan_boss`（Boss 曲小节线进入）。子弹时间时音乐整体低通。
 - 首次手势解锁 AudioContext（iOS）；操作面板里有音乐/音效音量滑杆（保存在 localStorage）；没有 audio/ 时静默降级为只有音效。
 
 ## 发布到 GitHub Pages（准备好了，未发布）
 - 全部相对路径，可放在子路径（如 `/ghoul-action/`）下；不依赖目录列表；有 `.nojekyll`。
 - 缓存版本号：`node tools/stamp.mjs` 给 `style.css`、`src/main.js` 和 import map 里每个 `src/*.js` 加 `?v=<内容哈希>`。每次改代码后、提交前跑一次。
+- 运行时清单是入库的 `art/manifest.json`（只列游戏用到的贴图）；画图王的 `art/MANIFEST.md`、概念图、预览图不随网页发布。测试会从 `git archive HEAD` 的干净导出、挂在 `/ghoul-action/` 子路径下运行，要求零 404、零控制台错误。
 
 ## 架构
 
@@ -115,6 +120,7 @@ src/hud.js / audio.js      DOM HUD（伤害数字、锁定标记、Boss 条）/ 
 src/input.js               动作层输入：键盘、鼠标（Pointer Lock）、多点触控摇杆/视角/按钮
 src/creative.js            连击评价、碎面具、血晶花、终焉变体
 src/models.js / artfx.js   3D 角色接入（克隆、clip 驱动、预算统计）/ 画图王 fx 贴图特效
+src/grade.js               绯魇调色后期 pass
 src/music.js               配乐管理（清单解析、交叉淡化、小节线切换、绯魇层、音量）
 tools/stamp.mjs            缓存版本号
 tests/smoke.js             Playwright 自动化测试（见下）
