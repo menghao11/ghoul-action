@@ -13,6 +13,11 @@ import { HitFX, Ghosts, Decals, Rings } from './fx.js';
 import { Sfx } from './audio.js';
 import { Hud } from './hud.js';
 import { N, TYPES } from './names.js';
+import { Creative, FINISHER_VARIANTS, RANKS } from './creative.js';
+import { loadArtGlow } from './tendril.js';
+import { ArtFX } from './artfx.js';
+import { Music } from './music.js';
+import { preloadModels, Models, sceneBudget } from './models.js';
 
 const Q_LABEL = { high: '高', mid: '中', low: '低' };
 const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
@@ -35,14 +40,16 @@ class World {
     // 角色补光：跟随相机方向的柔光 + 主角头顶冷色轮廓光（只是照明，与相机抖动无关）
     this.fill = new THREE.DirectionalLight(0xffe0e8, 1.3); this.scene.add(this.fill); this.scene.add(this.fill.target);
     this.rim = new THREE.PointLight(0xff4060, 3, 5, 1.6); this.scene.add(this.rim);
-    this.sfx = new Sfx();
+    this.sfx = new Sfx(); this.music = new Music(this.sfx, 'audio/');
     this.city = buildCity(this.scene, this.quality);
     this.fx = new HitFX(this.scene, this.quality); this.ghosts = new Ghosts(this.scene, 10); this.decals = new Decals(this.scene, 18); this.rings = new Rings(this.scene, 12);
     this.enemies = []; this.tokens = new Set(); this.maxTokens = 2;
     this.time = 0; this.realTime = 0; this.hitstopT = 0; this.btT = 0; this.btScale = 0.2; this.btBlend = 0; this.enemyTimeScale = 1; this.playerTimeScale = 1;
     this.stats = { hits: 0, kills: 0, perfect: 0, dodges: 0, switches: 0, moves: {}, damageTaken: 0, shards: 0, maxCombo: 0, parries: 0, awakens: 0, finishers: 0 };
     this.hud = new Hud(this);
+    this.creative = new Creative(this);
     this.player = new Player(this); this.hud.flashType(this.player.typeIdx);
+    this.artfx = new ArtFX(this); this.artfx.load().then(() => loadArtGlow('art/')).then((r) => { window.__artGlow = r; if (r.length) console.info('art glow textures', r); });
     this.playerBlob = this.makeBlob(0.8);
     this.cam.snap(this.player); this.cam.yaw = Math.PI / 2 + Math.PI; this.cam.yaw = -Math.PI / 2;
     this._initProjectiles();
@@ -83,13 +90,18 @@ class World {
   }
   _ui() {
     const ov = document.getElementById('overlay');
-    const start = () => { if (this.over) { location.reload(); return; } ov.classList.add('hidden'); this.paused = false; this.sfx.unlock(); if (!isTouch && !this.input.noPointerLock) this.renderer.domElement.requestPointerLock?.(); };
+    const start = () => { if (this.over) { location.reload(); return; } ov.classList.add('hidden'); this.paused = false; this.music.unlock(); if (!isTouch && !this.input.noPointerLock) this.renderer.domElement.requestPointerLock?.(); };
     document.getElementById('btnStart').addEventListener('click', start);
     document.getElementById('btnHelp').addEventListener('pointerdown', (e) => { e.stopPropagation(); ov.classList.remove('hidden'); this.paused = true; document.exitPointerLock?.(); document.getElementById('btnStart').textContent = this.started ? '继续' : '开始'; });
     document.getElementById('btnPause').addEventListener('pointerdown', (e) => { e.stopPropagation(); this.paused = !this.paused; e.target.textContent = this.paused ? '继续' : '暂停'; });
     document.getElementById('btnQuality').addEventListener('pointerdown', (e) => { e.stopPropagation(); const order = ['high', 'mid', 'low']; this.setQuality(order[(order.indexOf(this.quality) + 1) % 3]); });
-    for (const ev of ['pointerdown', 'touchend', 'click']) addEventListener(ev, () => this.sfx.unlock(), { passive: true }); // iOS 需在用户手势里解锁音频
-    addEventListener('keydown', (e) => { this.sfx.unlock(); if (e.code === 'KeyP') { this.paused = !this.paused; } if (e.code === 'Backquote') document.getElementById('fps').classList.toggle('hidden'); });
+    // 音量设置（保存在 localStorage）
+    const vm = document.getElementById('volMusic'), vs = document.getElementById('volSfx');
+    vm.value = Math.round(this.music.vol.music * 100); vs.value = Math.round(this.music.vol.sfx * 100);
+    vm.addEventListener('input', () => this.music.setVolume('music', vm.value / 100)); vs.addEventListener('input', () => { this.music.setVolume('sfx', vs.value / 100); this.sfx.hit(0.6); });
+    this.music.manifestP.then(() => { document.getElementById('musicState').textContent = this.music.status === 'absent' ? '（配乐未就绪，仅音效）' : '配乐：' + Object.keys(this.music.tracks).length + ' 轨'; });
+    for (const ev of ['pointerdown', 'touchend', 'click']) addEventListener(ev, () => this.music.unlock(), { passive: true }); // iOS 需在用户手势里解锁音频
+    addEventListener('keydown', (e) => { this.music.unlock(); if (e.code === 'KeyP') { this.paused = !this.paused; } if (e.code === 'Backquote') document.getElementById('fps').classList.toggle('hidden'); });
     if (params.get('autostart') === '1') { ov.classList.add('hidden'); this.paused = false; }
     document.addEventListener('gesturestart', (e) => e.preventDefault());
   }
@@ -116,7 +128,9 @@ class World {
     this.shards = Array.from({ length: 48 }, () => { const m = new THREE.Mesh(sg, smat); m.visible = false; this.scene.add(m); return { m, on: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), life: 0, dmg: 0, homing: 0, target: null }; });
     const bg = new THREE.CylinderGeometry(0.06, 0.06, 1.1, 5); bg.rotateX(Math.PI / 2);
     const bmat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.6, 1.6, 2.4), toneMapped: false });
-    this.bolts = Array.from({ length: 24 }, () => { const m = new THREE.Mesh(bg, bmat); m.visible = false; this.scene.add(m); return { m, on: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), life: 0, dmg: 0, owner: null, grazed: false }; });
+    // 晶刺手（远程蚀者）投射的是红色晶刺，不是弩箭：单独一套几何/材质
+    const cg = new THREE.OctahedronGeometry(0.12, 0); cg.scale(0.55, 0.55, 3.2); const cmat = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.4, 0.25, 0.45), toneMapped: false });
+    this.bolts = Array.from({ length: 24 }, () => { const m = new THREE.Mesh(bg, bmat); m.visible = false; this.scene.add(m); const c = new THREE.Mesh(cg, cmat); c.visible = false; this.scene.add(c); return { m, mBolt: m, mCrystal: c, on: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), life: 0, dmg: 0, owner: null, grazed: false }; });
   }
   fireShards(pl, pd) {
     const tgt = pl.target && pl.target.alive ? pl.target : pl.pickTarget(18);
@@ -139,6 +153,7 @@ class World {
       const b = this.bolts.find((x) => !x.on); if (!b) return;
       const yaw = yaw0 + (pr.n > 1 ? (i / (pr.n - 1) - 0.5) * pr.spread * Math.PI / 180 : 0);
       b.pos.copy(o); b.vel.set(Math.sin(yaw) * pr.speed, 0, Math.cos(yaw) * pr.speed); b.vel.y = ((P.pos.y + 1.0) - o.y) / Math.max(1, e.pos.distanceTo(P.pos)) * pr.speed;
+      b.m.visible = false; b.m = e.kind === 'shooter' ? b.mCrystal : b.mBolt; b.crystal = e.kind === 'shooter';
       b.life = 1.6; b.dmg = pr.dmg; b.owner = e; b.on = true; b.m.visible = true;
     }
   }
@@ -156,7 +171,7 @@ class World {
     for (const b of this.bolts) {
       if (!b.on) continue; b.life -= edt; b.pos.addScaledVector(b.vel, edt); b.m.position.copy(b.pos); b.m.lookAt(b.pos.x + b.vel.x, b.pos.y + b.vel.y, b.pos.z + b.vel.z);
       const dx = b.pos.x - P.pos.x, dz = b.pos.z - P.pos.z, dy = b.pos.y - (P.pos.y + 0.9);
-      const early = P.state === 'dodge' && P.dodgeT <= 0.26; const rr = 0.5 + (early ? 1.1 : 0);
+    const early = P.perfectOpen(); const rr = 0.5 + (early ? 1.1 : 0);
       if (dx * dx + dz * dz < rr * rr && Math.abs(dy) < 1.1) {
         const r = P.receive(b.dmg, b.owner, { kb: 3 });
         if (r === 'hit') this.playerHitFX(b.pos); if (r === 'block' || r === 'parry') this.fx.burst(b.pos, [0.6, 0.9, 1], 14, 5, 0.06);
@@ -167,7 +182,7 @@ class World {
   }
   // ---------- 战斗结算 ----------
   playerStrike(pl, hd, move) {
-    const yaw = pl.yaw; let any = false, maxHs = 0, first = null;
+    const yaw = pl.yaw; let any = false, maxHs = 0, first = null; const hitList = [];
     const mul = pl.awake > 0 ? 1.6 : 1;
     for (const e of this.enemies) {
       if (!e.alive || e.state === 'spawn') continue;
@@ -179,13 +194,14 @@ class World {
       const dmg = hd.dmg * mul * (0.92 + Math.random() * 0.16);
       this.applyHit(e, hd, dmg, dir, (hd.hs || 0.05) * 14);
       if (move.heal) { const h = dmg * move.heal; pl.hp = Math.min(pl.maxHp, pl.hp + h); if (h >= 1) this.hud.dmg(new THREE.Vector3(pl.pos.x, pl.pos.y + 2.1, pl.pos.z), h, 'heal'); }
-      any = true; maxHs = Math.max(maxHs, hd.hs || 0.05); if (!first) first = e;
+      any = true; maxHs = Math.max(maxHs, hd.hs || 0.05); if (!first) first = e; hitList.push(e);
     }
-    if (hd.ring) { this.rings.spawn(pl.pos, hd.ring, 0.35); this.fx.burst(new THREE.Vector3(pl.pos.x, 0.2, pl.pos.z), [1, 0.1, 0.15], 24, 7, 0.09); }
+    if (move.finisher) this.creative.finisherHit(pl.type, hitList, hd.dmg > 100, pl);
+    if (hd.ring) { this.impact(pl.pos, hd.ring + 5); this.rings.spawn(pl.pos, hd.ring, 0.35); this.fx.burst(new THREE.Vector3(pl.pos.x, 0.2, pl.pos.z), [1, 0.1, 0.15], 24, 7, 0.09); }
     if (hd.boom) this.fx.burst(pl.forward(new THREE.Vector3()).clone().multiplyScalar(2).add(pl.pos).setY(pl.pos.y + 1), [1, 0.3, 0.2], 40, 9, 0.12);
     if (any) {
       this.hitstop(maxHs * (pl.awake > 0 ? 1.15 : 1));
-      if (hd.launch && first) { pl.chaseT = 0.9; pl.target = first; }
+      if (hd.launch && first) { pl.chaseT = (hd.up || 10) / 15 + 0.45; pl.target = first; } // 由挑空初速推导：到顶点(up/g_juggle)后再留 0.45s
       if (move.finisher) this.stats.finishers++;
     }
     return any;
@@ -194,10 +210,17 @@ class World {
     if (!e.takeHit(hd, dir, dmg)) return;
     const p = new THREE.Vector3(e.pos.x, e.pos.y + e.height * 0.55, e.pos.z);
     this.fx.blood(p, dir, Math.min(2, 0.5 + power * 0.6));
+    this.artfx.flash('spark', p, 1.0 + Math.min(1.2, dmg / 40), 0xffd0d8, 0.4); if (dmg >= 30) this.artfx.flash('star', p, 1.6 + Math.min(2.5, dmg / 60), 0xff7090, 0.3);
     this.hud.dmg(p.clone().setY(p.y + 0.4), dmg, dmg > 45 ? 'big' : '');
+    this.creative.onHit(dmg, this.player.moveId, e.airborne);
     this.hud.addCombo(); this.stats.hits++; this.stats.maxCombo = Math.max(this.stats.maxCombo, this.hud.combo);
     this.player.addEnergy(2 + dmg * 0.07);
     this.sfx.hit(Math.min(1.6, 0.5 + dmg / 40));
+  }
+  // 重击/砸地/终焉的冲击波：附近霓虹招牌短路（暗下→火花→缓慢复燃）
+  impact(pos, r) {
+    const n = this.city.shortOut(pos, r, (g) => { for (let k = 0; k < 14; k++) this.fx.spark.emit(g.x + (Math.random() - 0.5) * 0.6, g.y - 0.4, g.z, (Math.random() - 0.5) * 2.5, Math.random() * 1.5, (Math.random() - 0.5) * 2.5, { r: 1, g: 0.7 + Math.random() * 0.3, b: 0.3, size: 0.05 + Math.random() * 0.04, life: 0.6 + Math.random() * 0.6, drag: 0.6, grav: 9 }); });
+    if (n) this.stats.signsShorted = (this.stats.signsShorted || 0) + n; return n;
   }
   hitstop(s) { this.hitstopT = Math.max(this.hitstopT, Math.min(0.35, s)); }
   bulletTime(dur, scale = 0.2) {
@@ -208,13 +231,14 @@ class World {
   }
   enemyStrike(e, s, origin, yaw) {
     const P = this.player; if (!P.alive) return false;
-    const early = P.state === 'dodge' && P.dodgeT <= 0.26 && !P.perfectUsed; const pr = P.radius + (early ? 1.3 : 0);
+    // 完美闪避窗口内：判定以"闪避起点"为准（攻击本来会打中那里），避免闪避位移把人带出判定圈导致窗口实际变短
+    const early = P.perfectOpen(); const pr = P.radius + (early ? 0.4 : 0);
     if (P.pos.y > (s.shape === 'circle' && s.r > 4 ? 1.6 : 2.4)) return false;
-    const rx = P.pos.x - origin.x, rz = P.pos.z - origin.z, d = Math.hypot(rx, rz);
-    let inside = false;
-    if (s.shape === 'sector') inside = d <= s.r + pr && (d < 0.5 || Math.abs(angDiff(yaw, Math.atan2(rx, rz))) <= s.arc + Math.atan2(pr, d));
-    else if (s.shape === 'circle') inside = d <= s.r + pr;
-    else { const fx = Math.sin(yaw), fz = Math.cos(yaw); const al = rx * fx + rz * fz, lat = Math.abs(rx * fz - rz * fx); inside = al >= -pr && al <= s.len + pr && lat <= s.width / 2 + pr; }
+    const test = (px, pz) => { const rx = px - origin.x, rz = pz - origin.z, d = Math.hypot(rx, rz);
+      if (s.shape === 'sector') return d <= s.r + pr && (d < 0.5 || Math.abs(angDiff(yaw, Math.atan2(rx, rz))) <= s.arc + Math.atan2(pr, d));
+      if (s.shape === 'circle') return d <= s.r + pr;
+      const fx = Math.sin(yaw), fz = Math.cos(yaw); const al = rx * fx + rz * fz, lat = Math.abs(rx * fz - rz * fx); return al >= -pr && al <= s.len + pr && lat <= s.width / 2 + pr; };
+    const inside = test(P.pos.x, P.pos.z) || (early && test(P.dodgeFrom.x, P.dodgeFrom.z));
     if (!inside) return false;
     const r = P.receive(s.dmg, e, { kb: s.kb || 5 });
     if (r === 'hit') this.playerHitFX(new THREE.Vector3(P.pos.x, P.pos.y + 1.1, P.pos.z));
@@ -222,8 +246,8 @@ class World {
     return r === 'hit' || r === 'block' || r === 'parry';
   }
   playerHitFX(p) { this.fx.blood(p, new THREE.Vector3(0, 0.3, 0), 0.8); this.hitstop(0.06); }
-  onPlayerHurt(d) { this.sfx.hurt(); const v = document.getElementById('vignette'); v.classList.add('on'); clearTimeout(this._vt); this._vt = setTimeout(() => { if (!(this.btT > 0 || this.player.awake > 0)) v.classList.remove('on'); }, 220); }
-  onParry(e) { this.stats.parries++; this.sfx.block(); this.hitstop(0.14); this.player.addEnergy(12); this.fx.burst(new THREE.Vector3(this.player.pos.x, 1.2, this.player.pos.z), [1, 0.8, 0.5], 30, 8, 0.08); this.hud.banner('完美格挡', '磐盾 · 反震', 0.8);
+  onPlayerHurt(d) { this.sfx.hurt(); this.creative.onHurt(); const v = document.getElementById('vignette'); v.classList.add('on'); clearTimeout(this._vt); this._vt = setTimeout(() => { if (!(this.btT > 0 || this.player.awake > 0)) v.classList.remove('on'); }, 220); }
+  onParry(e) { this.stats.parries++; this.creative.bonus(30); this.sfx.block(); this.hitstop(0.14); this.player.addEnergy(12); this.fx.burst(new THREE.Vector3(this.player.pos.x, 1.2, this.player.pos.z), [1, 0.8, 0.5], 30, 8, 0.08); this.hud.banner('完美格挡', '磐盾 · 反震', 0.8);
     if (e.isBoss) { e.poise -= 160; if (e.poise <= 0) { e.poise = e.maxPoise; e.interrupt(); e.state = 'stagger'; e.st = 0; e.stunT = 2.4; } } else { e.interrupt(); e.state = 'stagger'; e.st = 0; e.stunT = 1.2; } }
   onBlock(e) { this.sfx.block(); this.hitstop(0.05); }
   onPlayerDead() { this.hud.banner('凌夜 倒下了', '', 2.5); this.over = true; setTimeout(() => this.showEnd('凌夜 倒下了'), 1800); }
@@ -257,8 +281,8 @@ class World {
   }
   nextWave() {
     this.wave++; const px = this.player.pos.x;
-    if (this.wave === 0) { this.hud.objective('目标：击退白鸦局巡夜员（1/3）'); for (const [x, z] of [[-18, -3], [-16, 3], [-14, 0]]) this.spawn('grunt', x, z); this.hud.banner(N.district, N.org + ' 的猎人出现了', 1.6); }
-    else if (this.wave === 1) { this.hud.objective('目标：清除增援（2/3）'); for (const [x, z] of [[px + 9, -4], [px + 10, 4], [px + 12, 0]]) this.spawn('grunt', x, z); this.spawn('shooter', px + 17, -6); this.spawn('shooter', px + 17, 6); this.maxTokens = 2; this.hud.banner('增援', '弩手会从远处射击 · 看地面红线闪避', 1.6); }
+    if (this.wave === 0) { this.hud.objective('目标：击退失控的狂蚀者（1/3）'); for (const [x, z] of [[-18, -3], [-16, 3], [-14, 0]]) this.spawn('grunt', x, z); this.hud.banner(N.district, '失控的同类在雨夜里游荡', 1.6); }
+    else if (this.wave === 1) { this.hud.objective('目标：清除增援（2/3）'); for (const [x, z] of [[px + 9, -4], [px + 10, 4]]) this.spawn('grunt', x, z); this.spawn('brute', px + 13, 0); this.spawn('shooter', px + 17, -6); this.spawn('shooter', px + 17, 6); this.maxTokens = 2; this.hud.banner('增援', '晶刺手远程投射 · 铁枷霸体，等它砸地后再打', 1.8); }
     else if (this.wave === 2) { this.hud.objective('目标：击败 ' + N.boss + '（3/3）'); const b = this.spawn('boss', Math.min(30, px + 14), 0); this.hud.banner(N.bossShort, N.boss, 2.0); }
   }
   // ---------- 主循环 ----------
@@ -283,21 +307,25 @@ class World {
     this.enemies = this.enemies.filter((e) => !e.removed);
     if (this.cam.lockTarget && !this.cam.lockTarget.alive) this.cam.lockTarget = this.bestLock();
     this.updateProjectiles(pdt, edt);
-    this.fx.update(fxdt); this.ghosts.update(realDt); this.decals.update(edt); this.rings.update(fxdt);
+    this.fx.update(fxdt); this.artfx.update(fxdt); this.ghosts.update(realDt); this.decals.update(edt); this.rings.update(fxdt);
     if (this.player.awake > 0) this.fx.aura(this.player.pos, 1);
     this.playerBlob.position.set(this.player.pos.x, 0.03, this.player.pos.z);
     this.cam.update(realDt, this.player);
     this.fill.position.copy(this.camera.position).add(new THREE.Vector3(0, 3, 0)); this.fill.target.position.copy(this.cam.focus);
     this.rim.position.set(this.player.pos.x, this.player.pos.y + 2.6, this.player.pos.z); this.rim.intensity = this.player.awake > 0 ? 8 : 3;
-    this.city.update(realDt, this.realTime, this.cam.focus);
+    this.creative.update(realDt); this.music.update(this);
+    this.city.update(realDt, this.realTime, this.cam.focus, hs < 1 ? 0.03 : Math.pow(this.enemyTimeScale, 1.6)); // 子弹时间/顿帧：雨滴悬停
     this.updateWaves(realDt);
     this.hud.update(realDt);
-    if (this.camLog) { const c = this.camera; this.camLog.push([c.position.x, c.position.y, c.position.z, c.quaternion.x, c.quaternion.y, c.quaternion.z, c.quaternion.w, c.fov, c.up.x, c.up.y, c.up.z, realDt, this.hitstopT > 0 ? 1 : 0]); }
+    if (this.camLog) { const c = this.camera; this.camLog.push([c.position.x, c.position.y, c.position.z, c.quaternion.x, c.quaternion.y, c.quaternion.z, c.quaternion.w, c.fov, c.up.x, c.up.y, c.up.z, realDt, this.hitstopT > 0 ? 1 : 0, this.cam.dbg ? this.cam.dbg.slice() : null, this.player.pos.x, this.player.pos.z, this.cam.lockTarget ? this.cam.lockTarget.id : -1, this.player.moveId]); }
     this.started = true;
   }
   render() { if (this.composer) this.composer.render(); else this.renderer.render(this.scene, this.camera); }
 }
 
+// 先加载画图王的 3D 角色（失败/缺失时自动用占位模型）
+{ const q0 = params.get('q') || store.get('ghoul_quality') || (isTouch ? 'mid' : 'high'); const lt = document.getElementById('loadingText'); if (lt) lt.textContent = '载入角色模型…';
+  await preloadModels({ mobile: isTouch, quality: q0 }); if (lt) lt.textContent = Models.ok ? '' : '（使用占位模型）'; }
 const world = new World();
 window.__world = world;
 addEventListener('keydown', (e) => { if (e.code === 'KeyR' && world.over) location.reload(); });
@@ -305,10 +333,12 @@ addEventListener('keydown', (e) => { if (e.code === 'KeyR' && world.over) locati
 window.__dbg = {
   ready: true,
   state() { const P = world.player; return { player: { state: P.state, hp: P.hp, energy: P.energy, awake: P.awake, type: P.type, typeIdx: P.typeIdx, pos: P.pos.toArray(), grounded: P.grounded, move: P.moveId, tendrilsVisible: Object.fromEntries(Object.entries(P.tendrils).map(([k, v]) => [k, v.filter((t) => t.mesh.visible).length])), armor: P.armorParts.filter((m) => m.visible).length, wrap: P.wrap.filter((t) => t.mesh.visible).length },
-    enemies: world.enemies.map((e) => ({ id: e.id, kind: e.kind, hp: e.hp, alive: e.alive, state: e.state, pos: e.pos.toArray(), phase: e.phase, airborne: e.airborne })), bt: world.btT, btScale: world.enemyTimeScale, hitstop: world.hitstopT, fps: world.fps, stats: world.stats, wave: world.wave, over: world.over, combo: world.hud.combo, quality: world.quality, lock: world.cam.lockTarget ? world.cam.lockTarget.id : null }; },
+    enemies: world.enemies.map((e) => ({ id: e.id, kind: e.kind, hp: e.hp, alive: e.alive, state: e.state, pos: e.pos.toArray(), phase: e.phase, airborne: e.airborne })), bt: world.btT, btScale: world.enemyTimeScale, hitstop: world.hitstopT, fps: world.fps, stats: world.stats, wave: world.wave, over: world.over, combo: world.hud.combo, quality: world.quality, lock: world.cam.lockTarget ? world.cam.lockTarget.id : null, rank: { level: world.creative.level, sp: world.creative.sp, letter: RANKS[world.creative.level].l, maxLevel: world.creative.maxLevel }, flowers: world.creative.flowers.length, maskShards: world.creative.shards.filter((x) => x.on).length, meteors: world.creative.meteors.filter((x) => x.on).length, signsOut: world.city.signs.filter((g) => g.hold > 0).length, rainT: world.city.rainT }; },
   press(a) { world.input.press(a); }, release(a) { world.input.release(a); },
   move(x, y) { world.input.virtual = { x, y, active: !!(x || y) }; },
   setType(i) { return world.player.setType(i); }, fillEnergy() { world.player.energy = 100; }, god(b = true) { world.player.god = b; },
+  music() { return world.music.debug(); },
+  models() { return { ok: Models.ok, error: Models.error, hero: Models.heroFile, loadMs: Models.loadMs, heroIsModel: !!world.player.rig.isModel, budget: sceneBudget(world.renderer, () => world.render()), mem: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null }; },
   killAll(includeBoss = false) { for (const e of world.enemies) if (e.alive && (includeBoss || !e.isBoss)) { e.hp = 1; world.applyHit(e, { dmg: 1, kb: 1 }, 5, new THREE.Vector3(1, 0, 0), 1); } },
   spawn(k, x, z) { return world.spawn(k, x, z).id; },
   clearEnemies() { for (const e of world.enemies) e.remove(); world.enemies = []; world.tokens.clear(); },

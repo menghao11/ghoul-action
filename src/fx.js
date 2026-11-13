@@ -63,12 +63,17 @@ export class Ghosts {
       if (this.pool.filter((x) => x.rig === rig).length >= this.max) g = this.pool.filter((x) => x.rig === rig).sort((a, b) => a.t - b.t)[0];
       else {
         const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false });
-        const grp = new THREE.Group(); const parts = rig.meshes.map((m) => { const c = new THREE.Mesh(m.geometry, mat); c.matrixAutoUpdate = false; grp.add(c); return c; });
+        const grp = new THREE.Group(); const parts = rig.meshes.map((m) => {
+          if (m.isSkinnedMesh) { // 蒙皮模型残影：独立的"冻结骨架"（脱离场景图的骨骼，矩阵为快照），共用几何
+            const bones = m.skeleton.bones.map(() => { const b = new THREE.Bone(); b.matrixAutoUpdate = false; b.matrixWorldAutoUpdate = false; return b; });
+            const c = new THREE.SkinnedMesh(m.geometry, mat); c.bind(new THREE.Skeleton(bones, m.skeleton.boneInverses), m.bindMatrix); c.matrixAutoUpdate = false; c.frustumCulled = false; c.userData.src = m; grp.add(c); return c; }
+          const c = new THREE.Mesh(m.geometry, mat); c.matrixAutoUpdate = false; grp.add(c); return c; });
         g = { rig, grp, parts, mat, t: 0, life }; this.scene.add(grp); this.pool.push(g);
       }
     }
     rig.root.updateMatrixWorld(true);
-    g.parts.forEach((c, i) => { c.matrix.copy(rig.meshes[i].matrixWorld); });
+    g.parts.forEach((c, i) => { const src = rig.meshes[i]; c.matrix.copy(src.matrixWorld); c.matrixWorld.copy(src.matrixWorld);
+      if (c.isSkinnedMesh) { c.matrixWorldAutoUpdate = false; c.bindMatrix.copy(src.bindMatrix); c.bindMatrixInverse.copy(src.bindMatrixInverse); src.skeleton.bones.forEach((b, k) => c.skeleton.bones[k].matrixWorld.copy(b.matrixWorld)); } });
     g.mat.color.setHex(color); g.t = life; g.life = life; g.alpha = alpha; g.grp.visible = true;
   }
   update(dt) { for (const g of this.pool) { if (g.t <= 0) { g.grp.visible = false; continue; } g.t -= dt; g.mat.opacity = Math.max(0, g.t / g.life) * g.alpha; } }
@@ -121,6 +126,8 @@ export class Rings {
       const m = new THREE.Mesh(geo, mat); m.visible = false; scene.add(m); this.list.push({ m, t: 0, life: 0.4, r0: 0.5, r1: 4 });
     }
   }
+  // 画图王的冲击环贴图：换成贴图平面（环在贴图里，半径≈0.92）
+  setTexture(tex) { const g = new THREE.PlaneGeometry(2.1, 2.1); g.rotateX(-Math.PI / 2); for (const r of this.list) { r.m.geometry = g; r.m.material.map = tex; r.m.material.needsUpdate = true; } }
   spawn(pos, r1 = 4, life = 0.4, color = 0xff2040, y = 0.08) {
     const r = this.list.find((x) => x.t <= 0) || this.list[0];
     r.t = life; r.life = life; r.r1 = r1; r.m.position.set(pos.x, (pos.y || 0) + y, pos.z); r.m.material.color.setHex(color); r.m.visible = true;

@@ -31,7 +31,7 @@ canvas#c{position:fixed;inset:0;width:100vw;height:100vh;display:block;touch-act
 #combo b{font-size:44px;font-style:italic;color:#fff;display:block;line-height:1}
 #combo span{font-size:13px;color:#ff8095;letter-spacing:3px}
 #combo em{display:block;font-style:normal;font-size:14px;color:#ffd0d8;margin-top:4px}
-#awakenTimer{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);width:240px;text-align:center;font-size:12px;color:#ff9db0;letter-spacing:4px}
+#awakenTimer{position:absolute;left:50%;bottom:max(16px,env(safe-area-inset-bottom));transform:translateX(-50%);width:240px;text-align:center;font-size:12px;color:#ff9db0;letter-spacing:4px}
 #awakenTimer i{display:block;height:4px;background:#ff1048;margin-top:3px;box-shadow:0 0 10px #ff1048}
 #topright{position:absolute;right:max(14px,env(safe-area-inset-right));top:max(10px,env(safe-area-inset-top));display:flex;gap:6px;pointer-events:auto}
 .sbtn{background:rgba(25,6,12,.7);color:#f0d0d8;border:1px solid rgba(255,70,100,.35);border-radius:3px;font-size:12px;padding:6px 10px}
@@ -44,11 +44,11 @@ canvas#c{position:fixed;inset:0;width:100vw;height:100vh;display:block;touch-act
 #banner.on{opacity:1}
 #banner small{display:block;font-size:14px;letter-spacing:4px;color:#ffb0c0;margin-top:6px}
 #touch{position:fixed;inset:0;z-index:2;pointer-events:none}
-#stickZone{position:absolute;left:0;top:25%;bottom:0;width:40%;pointer-events:auto;touch-action:none}
+#stickZone{position:absolute;left:env(safe-area-inset-left);top:25%;bottom:0;width:40%;pointer-events:auto;touch-action:none}
 #camZone{position:absolute;left:40%;right:0;top:12%;bottom:0;pointer-events:auto;touch-action:none}
-#stickBase{position:absolute;width:120px;height:120px;border-radius:50%;border:2px solid rgba(255,80,110,.35);background:rgba(30,5,12,.25);left:60px;bottom:40px;opacity:.55}
+#stickBase{position:absolute;width:120px;height:120px;border-radius:50%;border:2px solid rgba(255,80,110,.35);background:rgba(30,5,12,.25);left:max(60px,calc(env(safe-area-inset-left) + 40px));bottom:max(40px,calc(env(safe-area-inset-bottom) + 24px));opacity:.55}
 #stickKnob{position:absolute;width:54px;height:54px;border-radius:50%;left:33px;top:33px;background:radial-gradient(circle,#ff4d6d,#6d0a1d);box-shadow:0 0 12px rgba(255,40,80,.6)}
-#tbtns{position:absolute;right:max(0px,env(safe-area-inset-right));bottom:0;width:320px;height:300px;pointer-events:none}
+#tbtns{position:absolute;right:max(6px,env(safe-area-inset-right));bottom:max(18px,env(safe-area-inset-bottom));width:320px;height:300px;pointer-events:none}
 .tb{position:absolute;width:64px;height:64px;border-radius:50%;pointer-events:auto;touch-action:none;background:radial-gradient(circle at 40% 35%,rgba(140,20,40,.85),rgba(30,4,10,.85));border:2px solid rgba(255,80,110,.55);color:#fff;font-size:14px;font-weight:700}
 .tb{-webkit-appearance:none;appearance:none;white-space:nowrap;padding:0}
 .tb.big{width:84px;height:84px;font-size:17px;border-radius:50%}
@@ -70,3 +70,29 @@ button.big{margin-top:14px;font-size:18px;padding:10px 40px;background:linear-gr
 @media (max-height:500px){.panel h1{font-size:22px}.panel p{font-size:12px;line-height:1.35}.cols{gap:10px}#objective{top:128px;font-size:12px}#combo{top:70px}#combo b{font-size:34px}}
 
 @media (max-height:430px){#tbtns{transform:scale(.8);transform-origin:100% 100%}#topleft{width:min(250px,34vw)}.who{font-size:13px}.tname{font-size:11px}.bar{height:9px}#types button{height:24px;font-size:11px}.sbtn{padding:4px 8px;font-size:11px}#objective{top:112px;font-size:11px}#stickBase{transform:scale(.85)}}
+
+/* 连击评价：只做平滑缩放入场，不闪烁 */
+#rank{position:absolute;right:max(24px,env(safe-area-inset-right));top:120px;text-align:center;min-width:86px;transform-origin:50% 50%}
+#rank b{display:block;font-size:46px;font-weight:900;font-style:italic;line-height:1;color:#ffd6de;text-shadow:0 0 10px #ff1040,0 2px 0 #3a0010;letter-spacing:-2px}
+#rank span{display:block;font-size:18px;font-weight:800;color:#ff4d6d;letter-spacing:6px;margin-top:2px;text-shadow:0 0 6px #000}
+#rank i{display:block;height:3px;background:rgba(255,255,255,.12);margin-top:5px}#rank u{display:block;height:100%;width:0;background:#ff2a50;transition:width .15s}
+#rank[data-lv="4"] b,#rank[data-lv="5"] b{color:#fff;text-shadow:0 0 14px #ff1040,0 0 30px #ff0030}
+#rank[data-lv="6"] b{color:#fff;font-size:52px;text-shadow:0 0 16px #ff1040,0 0 40px #ff0030,0 0 60px #a00020}
+#rank.pop{animation:rankpop .32s cubic-bezier(.2,1.6,.4,1)}
+@keyframes rankpop{from{transform:scale(1.5);opacity:.4}to{transform:scale(1);opacity:1}}
+@media (max-height:430px){#rank{top:84px;right:auto;left:max(14px,env(safe-area-inset-left));top:136px;min-width:60px}#rank b{font-size:30px}#rank span{font-size:13px}}
+
+/* HUD 数字不裁切：条本身不再 overflow:hidden，数字放在条右侧外面 */
+.bar.hp,.bar.en{overflow:visible;margin-right:36px}
+.bar.hp b{right:-36px;top:50%;width:32px;text-align:left;line-height:1;transform:translateY(-50%) skewX(14deg);font-size:11px}
+.bar.en{margin-bottom:15px}
+.bar.en b{right:auto;left:2px;top:calc(100% + 2px);line-height:1;white-space:nowrap;font-size:10px;color:#ff9db0;transform:skewX(14deg)}
+/* 连击数字移到左侧目标提示下方，不再和敌人血条/伤害数字抢画面中心 */
+#combo{right:auto;left:max(14px,env(safe-area-inset-left));top:186px;text-align:left}
+@media (max-height:500px){#combo{top:150px}#combo b{font-size:30px}#combo em{font-size:12px}}
+@media (max-height:430px){#combo{top:132px}#combo b{font-size:26px}#combo span{font-size:11px}#combo em{font-size:11px;margin-top:1px}
+  #rank{left:auto!important;right:max(14px,env(safe-area-inset-right))!important;top:44px!important}}
+
+#volRow{display:flex;gap:18px;align-items:center;margin-top:10px;font-size:13px;color:#ffb0c0;flex-wrap:wrap}
+#volRow input{width:120px;touch-action:auto;-webkit-user-select:auto;accent-color:#ff2a50;vertical-align:middle;pointer-events:auto}
+#musicState{font-size:11px;color:#9a7a82}

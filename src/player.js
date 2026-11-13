@@ -6,6 +6,10 @@ import { buildMoves } from './moves.js';
 import { TYPES, MOVE_NAMES } from './names.js';
 import { angDiff } from './camera.js';
 import { toon } from './toon.js';
+import { FINISHER_VARIANTS } from './creative.js';
+import { makeModelRig } from './models.js';
+export const PERFECT_WINDOW = 0.26; // 完美闪避窗口（含端点，按帧起点判定）
+export const FINISHER_GATE = 0.8; // 绯魇开启后多少秒（真实时间）可放终焉
 
 const D2R = Math.PI / 180;
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
@@ -22,7 +26,8 @@ const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3
 export class Player {
   constructor(world) {
     this.w = world; const scene = world.scene;
-    this.rig = makeRig({ coat: 0x2a2232, pants: 0x1a1620, hair: 0xf4f4fa, accent: 0xff1a3a, outline: world.quality !== 'low' });
+    this.rig = makeModelRig('hero') || makeRig({ coat: 0x2a2232, pants: 0x1a1620, hair: 0xf4f4fa, accent: 0xff1a3a, outline: world.quality !== 'low' });
+    if (this.rig.isModel) this.rig.play('idle', { fade: 0 });
     scene.add(this.rig.root);
     this.pos = new THREE.Vector3(-30, 0, 0); this.vel = new THREE.Vector3(); this.yaw = Math.PI / 2; this.radius = 0.45; this.height = 1.8;
     this.maxHp = 100; this.hp = 100; this.energy = 0; this.alive = true;
@@ -35,10 +40,10 @@ export class Player {
     // 血绫
     this.tendrils = {}; this.trails = {};
     for (const t of TYPES) {
-      this.tendrils[t.id] = TENDRIL_DEFS[t.id].map((d) => { const td = new Tendril(scene, { length: d.len, radius: d.radius, flat: d.flat || 1, plates: d.plates || 0, spikes: d.spikes || 0, k0: d.k0 || 420, k1: d.k1 || 140, color: d.color }); td.def = d; td.lenScale = 0; return td; });
+      this.tendrils[t.id] = TENDRIL_DEFS[t.id].map((d) => { const td = new Tendril(scene, { kind: t.id, length: d.len, radius: d.radius, flat: d.flat || 1, plates: d.plates || 0, spikes: d.spikes || 0, k0: d.k0 || 420, k1: d.k1 || 140, color: d.color }); td.def = d; td.lenScale = 0; return td; });
       this.trails[t.id] = this.tendrils[t.id].map(() => new Trail(scene, 16, 0xff2448));
     }
-    this.wrap = Array.from({ length: 6 }, (_, i) => { const td = new Tendril(scene, { length: 2.2, radius: 0.05, k0: 600, k1: 260, spikes: 1, color: 0xff0838 }); td.lenScale = 0; td.def = { anchor: 'back', off: [0, 0, 0] }; return td; });
+    this.wrap = Array.from({ length: 6 }, (_, i) => { const td = new Tendril(scene, { kind: 'awaken', length: 2.2, radius: 0.05, k0: 600, k1: 260, spikes: 1, color: 0xff0838 }); td.lenScale = 0; td.def = { anchor: 'back', off: [0, 0, 0] }; return td; });
     this.wrapTrails = this.wrap.map(() => new Trail(scene, 14, 0xff1040));
     this.tendrils[this.type].forEach((t) => (t.targetLen = 1));
     this._buildArmor();
@@ -49,7 +54,11 @@ export class Player {
     const spike = (len, r) => { const c = new THREE.ConeGeometry(r, len, 5); c.translate(0, len / 2, 0); return c; };
     const add = (parent, geo, pos, rot) => { const m = new THREE.Mesh(geo, mat); m.position.set(...pos); m.rotation.set(...rot); parent.add(m); this.armorParts.push(m); return m; };
     this.armorParts = [];
-    const J = this.rig.J;
+    let J = this.rig.J;
+    if (this.rig.isModel) { // 模型骨骼局部轴向和程序骨架不同：护甲挂在每帧跟随骨骼位置、朝向跟身体的锚点上
+      this.armorAnchors = []; J = {};
+      for (const [k, bone] of Object.entries(this.rig.J)) { if (!bone) continue; const g = new THREE.Group(); this.rig.body.add(g); J[k] = g; this.armorAnchors.push([g, bone]); }
+    }
     for (const s of [1, -1]) {
       add(J[s > 0 ? 'shL' : 'shR'], spike(0.38, 0.11), [0.03 * s, 0.05, 0], [0, 0, -0.7 * s]);
       add(J[s > 0 ? 'shL' : 'shR'], spike(0.26, 0.08), [0.05 * s, -0.08, -0.05], [-0.6, 0, -1.1 * s]);
@@ -92,7 +101,8 @@ export class Player {
     this.yaw = Math.atan2(t.pos.x - this.pos.x, t.pos.z - this.pos.z);
   }
   startMove(id) {
-    const m = this.curMoves[id]; if (!m) return false;
+    const m = this.curMoves[id]; if (!m) return false; this.moveSerial = (this.moveSerial || 0) + 1;
+    if (m.hits.length && m.pose !== 'cast' && !m.finisher) this.w.artfx?.slashArc(this.pos, this.yaw, m.side || 1, Math.max(2.4, (m.hits[0].range || 2.6) * 1.15));
     this.move = m; this.moveId = id; this.mt = 0; this.hitDone.clear(); this.projDone.clear(); this.state = 'attack';
     this.target = this.pickTarget(m.air ? 8 : 7.5); this.faceTarget(this.target);
     if (m.teleport && this.target) { // 瞬影：闪到目标身后
@@ -104,7 +114,8 @@ export class Player {
     if (!m.air && !m.hang) { this.vel.x *= 0.2; this.vel.z *= 0.2; }
     if (m.slam) { this.vel.set(0, -4, 0); }
     if (m.finisher) { this.vel.set(0, 6, 0); this.w.bulletTime(1.8, 0.15); }
-    const nm = MOVE_NAMES[m.name] || (id.startsWith('L') ? MOVE_NAMES.L : id.startsWith('air') ? MOVE_NAMES.airL : '');
+    if (m.finisher) this.w.hud.banner(FINISHER_VARIANTS[this.type].name, '', 1.6);
+    const nm = m.finisher ? FINISHER_VARIANTS[this.type].name : MOVE_NAMES[m.name] || (id.startsWith('L') ? MOVE_NAMES.L : id.startsWith('air') ? MOVE_NAMES.airL : '');
     if (nm) this.w.hud.moveName(nm);
     this.w.sfx.whoosh(m.dur < 0.35 ? 1.3 : 0.9);
     this.w.stats.moves[id] = (this.w.stats.moves[id] || 0) + 1;
@@ -114,7 +125,7 @@ export class Player {
   // 根据当前状态与缓冲输入选下一招
   tryAttack(canChain) {
     const I = this.w.input, buf = 0.3;
-    if (this.awake > 0 && !this.finisherUsed && I.consume('ult', buf) && this.awake < this.awakeMax - 0.8) { this.finisherUsed = true; this.startMove('finisher'); this.awake = this.curMoves.finisher.dur + 0.15; return true; }
+    if (this.awake > 0 && !this.finisherUsed && I.consume('ult', buf) && this.w.realTime - (this.awakenReal ?? -9) >= FINISHER_GATE - 1e-6) { this.finisherUsed = true; this.startMove('finisher'); this.awake = this.curMoves.finisher.dur + 0.15; return true; }
     const sinceDodge = this.w.time - this.lastDodge;
     if (I.peek('skill', buf)) {
       I.consume('skill', buf); this.comboStep = 0;
@@ -145,7 +156,7 @@ export class Player {
     if (!I.peek('dodge', 0.2)) return false;
     if (!this.grounded && this.airDodges <= 0) return false;
     I.consume('dodge', 0.2); if (!this.grounded) this.airDodges--;
-    this.state = 'dodge'; this.dodgeT = 0; this.move = null; this.comboStep = 0; this.lastDodge = this.w.time; this.perfectUsed = false;
+    this.dodgeFrom = this.pos.clone(); this.state = 'dodge'; this.dodgeT = 0; this.move = null; this.comboStep = 0; this.lastDodge = this.w.time; this.perfectUsed = false;
     if (this.inputDir.lengthSq() > 0.01) this.dodgeDir.copy(this.inputDir).normalize(); else this.dodgeDir.copy(this.forward(_c)).multiplyScalar(-1);
     this.yaw = Math.atan2(this.dodgeDir.x, this.dodgeDir.z) + (this.inputDir.lengthSq() > 0.01 ? 0 : Math.PI);
     this.vel.y = this.grounded ? 0 : 1.5;
@@ -165,11 +176,13 @@ export class Player {
     this.airStep = 0;
     return true;
   }
+  // 完美闪避窗口（含端点 0.26s；按本帧起点判定，消除离散帧误差）
+  perfectOpen() { return this.state === 'dodge' && !this.perfectUsed && this.dodgeT - (this.lastDt || 0) <= PERFECT_WINDOW + 1e-6; }
   // 敌人攻击打到玩家时调用；返回 'hit' | 'evade' | 'perfect' | 'block' | 'parry'
   receive(dmg, from, opts = {}) {
     if (!this.alive) return 'evade';
     if (this.state === 'dodge') {
-      if (this.dodgeT <= 0.26 && !this.perfectUsed) { this.perfectUsed = true; this.onPerfect(from); return 'perfect'; }
+      if (this.perfectOpen()) { this.perfectUsed = true; this.onPerfect(from); return 'perfect'; }
       if (this.iframe > 0) return 'evade';
     }
     if (this.iframe > 0) return 'evade';
@@ -186,23 +199,32 @@ export class Player {
     this.w.stats.damageTaken += dmg;
     if (this.hp <= 0) { this.hp = 0; this.alive = false; this.state = 'dead'; this.w.onPlayerDead(); return 'hit'; }
     if (this.awake <= 0 && !(this.state === 'attack' && this.move && (this.move.dur > 0.9))) {
-      this.state = 'hurt'; this.hurtT = 0.32; this.move = null; this.comboStep = 0;
+      this.state = 'hurt'; this.hurtSerial = (this.hurtSerial || 0) + 1; this.hurtT = 0.32; this.move = null; this.comboStep = 0;
       if (from) { _a.subVectors(this.pos, from.pos).setY(0).normalize(); this.vel.x = _a.x * (opts.kb || 5); this.vel.z = _a.z * (opts.kb || 5); }
     }
     this.w.onPlayerHurt(dmg); return 'hit';
   }
   onPerfect(from) {
-    this.perfectReady = 1.4; this.iframe = Math.max(this.iframe, 0.5); this.addEnergy(18);
+    this.perfectReady = 1.4; this.iframe = Math.max(this.iframe, 0.5); this.addEnergy(18); this.w.creative.bonus(40);
     this.w.bulletTime(1.4); this.w.stats.perfect++;
+    this.w.artfx.flash('star', _a.set(this.pos.x, this.pos.y + 1.2, this.pos.z), 3.2, 0xff6080, 0.5, 0); this.eyeGlint(0.6);
   }
   addEnergy(v) { if (this.awake > 0) return; this.energy = clamp(this.energy + v, 0, 100); }
+  // 眼部光晕：在头部（未戴眼罩的左眼一侧）闪一下
+  eyeGlint(life = 0.5) {
+    const head = this.rig.isModel ? this.rig.bones.mixamorigHead : this.rig.J && this.rig.J.head; if (!head) return;
+    head.getWorldPosition(_q); const f = _t.set(Math.sin(this.yaw), 0, Math.cos(this.yaw)), r = _b.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+    _q.addScaledVector(f, 0.12).addScaledVector(r, 0.035); _q.y += 0.07; this.w.artfx.flash('glint', _q, 0.55, 0xff2040, life, 0);
+  }
   activateAwaken() {
+    this.eyeGlint(1.0);
     if (this.energy < 100 || this.awake > 0) return false;
-    this.energy = 0; this.awake = this.awakeMax; this.finisherUsed = false; this.state = 'ult'; this.st = 0; this.move = null; this.iframe = 0.9;
+    this.energy = 0; this.awake = this.awakeMax; this.finisherUsed = false; this.awakenReal = this.w.realTime; this.state = 'ult'; this.st = 0; this.move = null; this.iframe = 0.9;
     this.armorParts.forEach((m) => (m.visible = true)); this.wrap.forEach((t) => { t.targetLen = 1; t.init = false; });
     this.w.onAwaken(); return true;
   }
   update(dt, realDt) {
+    this.lastDt = dt;
     const w = this.w, I = w.input; this.time += dt;
     // 输入方向（相机相对）
     const f = w.cam.forward(), r = w.cam.right();
@@ -241,7 +263,7 @@ export class Player {
         this.dodgeT += dt; const D = 0.3, p = clamp(this.dodgeT / D, 0, 1);
         const v = 22 * Math.pow(1 - p, 1.6) + 2;
         this.vel.x = this.dodgeDir.x * v; this.vel.z = this.dodgeDir.z * v; grav = this.grounded ? 30 : 4;
-        this.iframe = Math.max(this.iframe, this.dodgeT < 0.26 ? 0.02 : 0);
+        this.iframe = Math.max(this.iframe, this.dodgeT < D ? 0.02 : 0); // 整段闪避无敌（前 0.26s 为完美判定）
         this.ghostT -= dt; if (this.ghostT <= 0) { this.ghostT = 0.035; w.ghosts.spawn(this.rig, 0xff1838, 0.3, 0.42); }
         if (this.dodgeT > 0.12 && (I.peek('light', 0.3) || I.peek('heavy', 0.3) || I.peek('skill', 0.3))) { if (this.tryAttack(false)) break; }
         if (this.dodgeT > 0.2 && this.tryDodge()) break;
@@ -250,7 +272,7 @@ export class Player {
         break;
       }
       case 'hurt': { this.hurtT -= dt; this.vel.x *= Math.exp(-6 * dt); this.vel.z *= Math.exp(-6 * dt); if (this.hurtT <= 0) this.toMove(); else if (this.hurtT < 0.16) this.tryDodge(); break; }
-      case 'ult': { this.st += dt; this.vel.set(0, 0, 0); grav = 0; if (this.st > 0.75) this.toMove(); break; }
+      case 'ult': { this.st += realDt; this.vel.set(0, 0, 0); grav = 0; if (this.st > 0.75) this.toMove(); break; }
       case 'dead': { this.vel.x *= 0.9; this.vel.z *= 0.9; break; }
     }
     // 物理
@@ -287,7 +309,7 @@ export class Player {
     if (m.hang && !this.grounded && !(m.lunge && t <= m.lunge[1])) this.vel.y = Math.max(this.vel.y, -1.5) * Math.exp(-4 * dt);
     if (m.slam) { this.vel.y = t < 0.12 ? 2 : -26; }
     if (m.finisher) { this.vel.y = t < 0.4 ? 4 : 0; this.vel.x = this.vel.z = 0; }
-    if (m.ghost || this.awake > 0) { this.ghostT -= dt; if (this.ghostT <= 0) { this.ghostT = 0.05; w.ghosts.spawn(this.rig, 0xff1030, 0.28, 0.35); } }
+    if (m.ghost || this.awake > 0 || w.creative.level >= 4) { this.ghostT -= dt; if (this.ghostT <= 0) { this.ghostT = 0.05; w.ghosts.spawn(this.rig, 0xff1030, 0.28, 0.35); } }
     // 判定
     m.hits.forEach((hd, i) => { if (t >= hd.t && !this.hitDone.has(i)) { this.hitDone.add(i); w.playerStrike(this, hd, m); } });
     if (m.proj) m.proj.forEach((pd, i) => { if (t >= pd.t && !this.projDone.has(i)) { this.projDone.add(i); w.fireShards(this, pd); } });
@@ -326,15 +348,56 @@ export class Player {
         k = 1 - Math.exp(-34 * dt); break;
       }
     }
-    if (!(this.state === 'attack' && this.move && this.move.pose === 'spin')) rig.body.rotation.y = rig.body.rotation.y % (Math.PI * 2) * Math.exp(-30 * dt);
-    applyPose(rig, pose, k);
+    const tornado = this.state === 'attack' && this.move && this.move.finisher && this.type === 'balanced' && this.mt > 0.3 && this.mt < 1.5;
+    if (tornado) rig.body.rotation.y += dt * 16; // 游龙·终焉「龙卷」：身体旋转
+    else if (!(this.state === 'attack' && this.move && this.move.pose === 'spin')) rig.body.rotation.y = rig.body.rotation.y % (Math.PI * 2) * Math.exp(-30 * dt);
+    if (rig.isModel) this.driveClips(dt); else applyPose(rig, pose, k);
     // 绯魇护甲动画
     const aw = this.awake > 0;
     for (const m of this.armorParts) { const s = m.scale.x + ((aw ? 1 : 0.001) - m.scale.x) * (1 - Math.exp(-10 * dt)); m.scale.setScalar(s); if (!aw && s < 0.01) m.visible = false; }
     root.updateMatrixWorld(true);
+    if (this.armorAnchors && aw) { for (const [g, bone] of this.armorAnchors) { bone.getWorldPosition(_a); g.position.copy(rig.body.worldToLocal(_a)); } root.updateMatrixWorld(true); }
     this.updateTendrils(dt);
   }
+  // 模型动画：按招式第一次出手时间缩放 clip，让 clip 的出手帧对准判定帧；状态间交叉淡化
+  driveClips(dt) {
+    const r = this.rig, hs = Math.hypot(this.vel.x, this.vel.z);
+    const CONTACT = { light1: 0.14, light2: 0.14, light3: 0.16, light4: 0.22, heavy: 0.3, launch: 0.2, air_attack: 0.15, cast: 0.22, ult: 0.4, guard: 0.1, land: 0.08 };
+    switch (this.state) {
+      case 'move':
+        if (!this.grounded) r.play('jump', { key: 'jump' + (this.vel.y > 0 ? 'u' : 'd'), loop: false, fade: 0.12, at: this.vel.y > 0 ? 0 : 0.45 });
+        else if (this.landT > 0) r.play('land', { loop: false, fade: 0.06 });
+        else if (hs > 0.6) r.play('run', { timeScale: clamp(hs / 6.5, 0.6, 1.6), fade: 0.15 });
+        else r.play('idle', { fade: 0.22 });
+        break;
+      case 'dodge': r.play('dodge', { key: 'dodge' + this.lastDodge, loop: false, timeScale: r.clipDur('dodge') / 0.3, fade: 0.05 }); break;
+      case 'hurt': r.play('hit', { key: 'hit' + this.hurtSerial, loop: false, fade: 0.05 }); break;
+      case 'guard': r.play('guard', { fade: 0.08 }); break;
+      case 'ult': r.play('ult', { loop: false, timeScale: r.clipDur('ult') / 0.75, fade: 0.08 }); break;
+      case 'dead': r.play('death', { loop: false, fade: 0.1 }); break;
+      case 'attack': {
+        const m = this.move, id = this.moveId; let clip;
+        if (m.finisher) clip = 'ult';
+        else if (/^L(\d)/.test(id)) clip = m.pose === 'cast' ? 'cast' : 'light' + id[1];
+        else if (id === 'H' || id === 'bash') clip = m.pose === 'cast' ? 'cast' : 'heavy';
+        else if (id === 'S') clip = this.type === 'ranged' ? 'cast' : this.type === 'heavy' ? 'guard' : this.type === 'burst' ? 'light3' : 'light4';
+        else if (id === 'launch') clip = 'launch';
+        else if (id === 'airH_land') clip = 'land';
+        else if (id.startsWith('air')) clip = 'air_attack';
+        else if (id === 'counter') clip = 'light3';
+        else if (id === 'pcounter') clip = 'light4';
+        else clip = 'light1';
+        const first = m.hits.length ? m.hits[0].t : m.proj ? m.proj[0].t : 0.15;
+        const ts = clamp((CONTACT[clip] || 0.15) / Math.max(0.05, first), 0.45, 2.6);
+        r.play(clip, { key: id + ':' + this.moveSerial, loop: clip === 'guard' ? null : false, timeScale: ts, fade: 0.06 });
+        break;
+      }
+    }
+    r.update(dt);
+  }
   updateTendrils(dt) {
+    // 跟音乐拍点的柔和辉光起伏（余弦，幅度很小，不闪烁）
+    const bp = this.w.music ? this.w.music.musicBeatPhase : null; this.beatGlow = bp == null ? 0 : 0.18 * (0.5 + 0.5 * Math.cos(bp * Math.PI * 2));
     const root = this.rig.root; const t = this.time;
     const m = this.state === 'attack' ? this.move : null; const tt = m && m.tendril;
     const guard = this.state === 'guard';
@@ -362,7 +425,7 @@ export class Player {
         td.setGoals((f, out) => { const u = 1 - f; out.set(u * u * A.x + 2 * u * f * C.x + f * f * tip.x, u * u * A.y + 2 * u * f * C.y + f * f * tip.y, u * u * A.z + 2 * u * f * C.z + f * f * tip.z); root.localToWorld(out); });
         td.refN.copy(right);
         td.radScale = (guard && active && type === 'heavy' ? 1.35 : 1) * (this.awake > 0 ? 1.15 : 1) * Math.min(1, td.lenScale * 1.2);
-        td.mat.emissiveIntensity = (this.awake > 0 ? 2.4 : 1.5) + (wgt > 0.5 ? 0.8 : 0);
+        td.mat.emissiveIntensity = (this.awake > 0 ? 2.4 : 1.5) + (wgt > 0.5 ? 0.8 : 0) + this.w.creative.level * 0.15 + this.beatGlow; trails[i].gain = this.w.creative.trailBoost;
         td.visible = true; td.step(dt); td.build();
         const n = td.P.length; trails[i].push(td.P[n - 1], td.P[n - 4], clamp((td.tipSpeed - 4) / 14, 0, 1) * td.lenScale); trails[i].update(dt);
       });
@@ -383,7 +446,7 @@ export class Player {
       });
       td.o.length = targetW ? 14 : 2.2;
       td.refN.copy(right); td.radScale = Math.min(1, td.lenScale * 1.2) * (targetW ? 1.6 : 1); td.mat.emissiveIntensity = 2.6; td.visible = true; td.step(dt); td.build();
-      const n = td.P.length; this.wrapTrails[i].push(td.P[n - 1], td.P[n - 3], clamp((td.tipSpeed - 3) / 10, 0, 1)); this.wrapTrails[i].update(dt);
+      const n = td.P.length; this.wrapTrails[i].gain = this.w.creative.trailBoost; this.wrapTrails[i].push(td.P[n - 1], td.P[n - 3], clamp((td.tipSpeed - 3) / 10, 0, 1)); this.wrapTrails[i].update(dt);
     });
   }
   tendrilTip(td, i, n, tt, guard, time, out) {

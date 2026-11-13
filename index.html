@@ -2,13 +2,37 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<meta name="build" content="3cad839a">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#07030a">
 <title>赤骸夜行 · 原型</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=3cad839a">
 <script type="importmap">
-{ "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/addons/" } }
+{
+ "imports": {
+  "three": "./vendor/three.module.js?v=r170",
+  "three/addons/": "./vendor/addons/",
+  "./src/artfx.js": "./src/artfx.js?v=3cad839a",
+  "./src/audio.js": "./src/audio.js?v=3cad839a",
+  "./src/camera.js": "./src/camera.js?v=3cad839a",
+  "./src/city.js": "./src/city.js?v=3cad839a",
+  "./src/creative.js": "./src/creative.js?v=3cad839a",
+  "./src/enemy.js": "./src/enemy.js?v=3cad839a",
+  "./src/fx.js": "./src/fx.js?v=3cad839a",
+  "./src/hud.js": "./src/hud.js?v=3cad839a",
+  "./src/input.js": "./src/input.js?v=3cad839a",
+  "./src/main.js": "./src/main.js?v=3cad839a",
+  "./src/models.js": "./src/models.js?v=3cad839a",
+  "./src/moves.js": "./src/moves.js?v=3cad839a",
+  "./src/music.js": "./src/music.js?v=3cad839a",
+  "./src/names.js": "./src/names.js?v=3cad839a",
+  "./src/player.js": "./src/player.js?v=3cad839a",
+  "./src/rig.js": "./src/rig.js?v=3cad839a",
+  "./src/tendril.js": "./src/tendril.js?v=3cad839a",
+  "./src/toon.js": "./src/toon.js?v=3cad839a"
+ }
+}
 </script>
 </head>
 <body>
@@ -25,6 +49,7 @@
   <div id="bossbar" class="hidden"><div class="bname" id="bossName"></div><div class="bar boss"><i id="bossFill"></i><i id="bossPoise"></i></div><div id="bossPhase"></div></div>
   <div id="objective"></div>
   <div id="combo" class="hidden"><b id="comboNum">0</b><span>连击</span><em id="moveName"></em></div>
+  <div id="rank" class="hidden"><b id="rankL">C</b><span id="rankN">凡</span><i><u id="rankFill"></u></i></div>
   <div id="awakenTimer" class="hidden"><span>绯魇</span><i id="awFill"></i></div>
   <div id="topright">
     <button id="btnQuality" class="sbtn">画质：中</button>
@@ -71,10 +96,11 @@
     <p>轻×4 连斩 · 轻轻重 = 升绫（挑空）→ 跳跃追击 → 空中轻击 → 空中重击 坠星</p>
     <p>闪避后马上攻击 = 闪反；敌人攻击前一瞬闪避 = 子弹时间（瞬影）</p>
     <p>星屑 远程晶刺 · 磐盾 重击格挡 · 狂澜 爆发吸血 · 游龙 横扫突刺</p>
-    <button id="btnStart" class="big">开始</button>
+    <div id="volRow"><label>音乐 <input id="volMusic" type="range" min="0" max="100" step="5"></label><label>音效 <input id="volSfx" type="range" min="0" max="100" step="5"></label><span id="musicState"></span></div>
+    <button id="btnStart" class="big">开始</button> <span id="loadingText" style="font-size:12px;color:#ff9db0"></span>
   </div>
 </div>
 <div id="rotate">请把手机横过来玩 ↻</div>
-<script type="module" src="src/main.js"></script>
+<script type="module" src="src/main.js?v=3cad839a"></script>
 </body>
 </html>

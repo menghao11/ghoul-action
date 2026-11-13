@@ -13,8 +13,39 @@ function veinTexture() {
   veinTex = new THREE.CanvasTexture(cv); veinTex.wrapS = THREE.RepeatWrapping; veinTex.wrapT = THREE.RepeatWrapping; veinTex.colorSpace = THREE.SRGBColorSpace;
   return veinTex;
 }
-export function tendrilMaterial(color = 0xff2040, intensity = 1.6) {
-  return new THREE.MeshStandardMaterial({ color: 0x1a0306, roughness: 0.32, metalness: 0.25, emissive: color, emissiveIntensity: intensity, emissiveMap: veinTexture() });
+const REG = []; const GLOW = {}; // 画图王的发光贴图（可选）：kind -> texture；'*' 为通用
+export function tendrilMaterial(color = 0xff2040, intensity = 1.6, kind = '*') {
+  const m = new THREE.MeshStandardMaterial({ color: 0x1a0306, roughness: 0.32, metalness: 0.25, emissive: color, emissiveIntensity: intensity, emissiveMap: GLOW[kind] || GLOW['*'] || veinTexture() });
+  if (ALBEDO) { m.map = ALBEDO; m.color.setHex(0x8a2a34); }
+  m.userData.kind = kind; REG.push(m); return m;
+}
+let ALBEDO = null;
+export function setAlbedoTexture(tex) { ALBEDO = tex; for (const m of REG) { m.map = tex; m.color.setHex(0x8a2a34); m.needsUpdate = true; } }
+export function setGlowTexture(kind, tex) {
+  tex.colorSpace = THREE.SRGBColorSpace; if (!tex.isCanvasTexture) tex.wrapS = tex.wrapT = THREE.RepeatWrapping; GLOW[kind] = tex;
+  for (const m of REG) if (kind === '*' ? !GLOW[m.userData.kind] || m.userData.kind === '*' : m.userData.kind === kind) { m.emissiveMap = tex; m.needsUpdate = true; }
+}
+// 读取 art/MANIFEST.md（或 art/manifest.json）里列出的发光贴图；文件名含 glow 即可，含类型关键词则只用于该形态
+const KIND_KEYS = { ranged: ['ranged', '星屑', 'shard', 'crystal'], heavy: ['heavy', '磐盾', 'shield'], burst: ['burst', '狂澜'], balanced: ['balanced', '游龙', 'tail'], awaken: ['awaken', '绯魇', 'wrap'] };
+export async function loadArtGlow(base = 'art/') {
+  const found = [];
+  // 只读固定位置的清单（GitHub Pages 没有目录列表）：art/MANIFEST.md、art/manifest.json、art/textures/MANIFEST.md、art/models/MANIFEST.md
+  for (const f of ['MANIFEST.md']) {
+    const dir = f.includes('/') ? f.slice(0, f.lastIndexOf('/') + 1) : '';
+    try { const r = await fetch(base + f, { cache: 'no-cache' }); if (!r.ok) continue; const txt = await r.text();
+      const re = /([\w\-./\u4e00-\u9fa5]*glow[\w\-./\u4e00-\u9fa5]*\.(?:png|webp|jpg|jpeg))/gi; let mm;
+      while ((mm = re.exec(txt))) { const n = mm[1].replace(/^(\.\/)?(art\/)?/, ''); found.push(n.includes('/') ? n : dir + n); }
+    } catch (e) { /* 没有美术资源时静默使用程序贴图 */ }
+  }
+  const loader = new THREE.TextureLoader(); const done = [];
+  for (const rel of [...new Set(found)]) {
+    const url = /^https?:/.test(rel) ? rel : base + rel.replace(/^\//, "").replace(/^(\.\/)?(art\/)?/, '');
+    const low = rel.toLowerCase(); let kind = '*';
+    if (!/tendril|kagune|血绫/.test(low) && !Object.values(KIND_KEYS).flat().some((w) => low.includes(w))) continue; // 只要血绫用的发光贴图（通用辉光精灵等交给 artfx.js）
+    for (const [k, keys] of Object.entries(KIND_KEYS)) if (keys.some((w) => low.includes(w))) kind = k;
+    try { const tex = await loader.loadAsync(url); setGlowTexture(kind, tex); done.push({ url, kind }); } catch (e) { console.warn('glow texture failed', url); }
+  }
+  return done;
 }
 const _v = new THREE.Vector3(), _t = new THREE.Vector3(), _n = new THREE.Vector3(), _b = new THREE.Vector3(), _q = new THREE.Vector3(), _N = new THREE.Vector3();
 export class Tendril {
@@ -37,7 +68,7 @@ export class Tendril {
     this.geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3).setUsage(THREE.DynamicDrawUsage));
     this.geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
     this.geo.setIndex(idx);
-    this.mat = tendrilMaterial(this.o.color);
+    this.mat = tendrilMaterial(this.o.color, 1.6, this.o.kind || '*');
     this.mesh = new THREE.Mesh(this.geo, this.mat); this.mesh.frustumCulled = false;
     scene.add(this.mesh);
     this.radScale = 1; this.lenScale = 0; this.visible = true; this.init = false;
@@ -106,7 +137,7 @@ export class Tendril {
 
 // 尖端拖尾：两条轨迹点构成带状，加色混合、按时间淡出
 const trailVS = `attribute float a; varying float va; void main(){ va=a; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);} `;
-const trailFS = `uniform vec3 col; varying float va; void main(){ gl_FragColor=vec4(col*va*1.6, va); }`;
+const trailFS = `uniform vec3 col; uniform float gain; varying float va; void main(){ gl_FragColor=vec4(col*va*1.6*gain, va); }`;
 export class Trail {
   constructor(scene, len = 18, color = 0xff2a4a) {
     this.len = len; this.A = []; this.B = []; this.age = [];
@@ -116,7 +147,7 @@ export class Trail {
     this.geo.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
     this.geo.setAttribute('a', new THREE.BufferAttribute(a, 1).setUsage(THREE.DynamicDrawUsage));
     this.geo.setIndex(idx);
-    this.mat = new THREE.ShaderMaterial({ vertexShader: trailVS, fragmentShader: trailFS, uniforms: { col: { value: new THREE.Color(color) } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+    this.mat = new THREE.ShaderMaterial({ vertexShader: trailVS, fragmentShader: trailFS, uniforms: { col: { value: new THREE.Color(color) }, gain: { value: 1 } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
     this.mesh = new THREE.Mesh(this.geo, this.mat); this.mesh.frustumCulled = false; scene.add(this.mesh);
     for (let i = 0; i < len; i++) { this.A.push(new THREE.Vector3()); this.B.push(new THREE.Vector3()); this.age.push(9); }
     this.head = 0; this.intensity = 0;
@@ -125,6 +156,7 @@ export class Trail {
     this.head = (this.head + 1) % this.len; this.A[this.head].copy(a); this.B[this.head].copy(b); this.age[this.head] = 0; this.str = strength;
   }
   update(dt, life = 0.16) {
+    this.mat.uniforms.gain.value = this.gain || 1;
     const pos = this.geo.attributes.position.array, al = this.geo.attributes.a.array;
     for (let i = 0; i < this.len; i++) {
       const j = (this.head - i + this.len) % this.len; this.age[j] += dt;

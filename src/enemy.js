@@ -4,13 +4,15 @@ import { makeRig, applyPose, Poses } from './rig.js';
 import { toon } from './toon.js';
 import { angDiff } from './camera.js';
 import { N } from './names.js';
+import { makeModelRig, Models } from './models.js';
 
 const D = Math.PI / 180; let UID = 0;
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const KINDS = {
   grunt: { hp: 150, scale: 1.0, speed: 3.8, radius: 0.45, coat: 0xd8d8e0, hair: 0x1a1a1e, name: N.grunt },
+  brute: { hp: 420, scale: 1.0, speed: 2.3, radius: 0.7, coat: 0x3a3036, hair: 0x1a1a1e, name: N.brute, armored: true },
   shooter: { hp: 110, scale: 0.97, speed: 3.4, radius: 0.45, coat: 0xa8b0c4, hair: 0x2a2a30, name: N.shooter },
-  boss: { hp: 4000, scale: 1.6, speed: 4.4, radius: 0.85, coat: 0xf2f2f6, hair: 0x9a9aa4, name: N.boss },
+  boss: { hp: 2600, scale: 1.6, speed: 4.4, radius: 0.85, coat: 0xf2f2f6, hair: 0x9a9aa4, name: N.boss },
 };
 const ATK = {
   slash: [{ w: 0.72, shape: 'sector', r: 2.8, arc: 50 * D, lunge: 2.0, dmg: 10, act: 0.14 }],
@@ -19,28 +21,46 @@ const ATK = {
   charge: [{ w: 0.85, shape: 'rect', width: 2.6, len: 13, dash: 26, dashT: 0.5, dmg: 20 }],
   slam: [{ w: 1.05, shape: 'circle', r: 4.4, at: 'target', jump: true, dmg: 24, ring: 4.6 }],
   fan: [{ w: 0.75, shape: 'sector', r: 16, arc: 28 * D, proj: { n: 5, spread: 50, speed: 17, dmg: 10 }, act: 0.1, aimLock: 0.2 }],
+  bslam: [{ w: 1.25, shape: 'circle', r: 3.6, lunge: 0.8, dmg: 22, ring: 3.8, act: 0.2 }], // 重型：慢、大范围、预警长的砸地
   spin: [{ w: 0.75, shape: 'circle', r: 5.2, dmg: 9, ticks: 3, tickGap: 0.22, act: 0.7, ring: 5.2 }],
 };
 export class Enemy {
   constructor(world, kind, x, z) {
     this.w = world; this.kind = kind; const K = KINDS[kind]; this.K = K; this.id = ++UID;
     this.isBoss = kind === 'boss'; this.name = K.name;
-    this.rig = makeRig({ coat: K.coat, hair: K.hair, pants: 0x1c1c24, skin: 0xe0cfc4, accent: this.isBoss ? 0x80e0ff : 0x60c8ff, scale: K.scale, outline: world.quality !== 'low', mask: this.isBoss, tag: 'e' + this.id });
-    this.coatMat = this.rig.meshes.find((m) => m.name === 'torso').material;
+    const mr = makeModelRig(kind, { scale: this.isBoss ? 1.32 : 1, flashable: true });
+    if (mr) { this.rig = mr; this.coatMat = mr.flashMat; this.rig.play('idle', { fade: 0 }); }
+    else {
+      this.rig = makeRig({ coat: K.coat, hair: K.hair, pants: 0x1c1c24, skin: 0xe0cfc4, accent: this.isBoss ? 0x80e0ff : 0x60c8ff, scale: K.scale * (kind === 'brute' ? 1.15 : 1), outline: world.quality !== 'low', mask: this.isBoss || kind === 'brute', maskColor: 0xe8e8ee, crow: kind === 'grunt' ? 'beak' : kind === 'shooter' ? 'goggle' : undefined });
+      this.coatMat = this.rig.meshes.find((m) => m.name === 'torso').material;
+    }
     world.scene.add(this.rig.root);
     this.pos = new THREE.Vector3(x, 0, z); this.vel = new THREE.Vector3(); this.yaw = -Math.PI / 2;
     this.hp = this.maxHp = K.hp; this.radius = K.radius; this.height = 1.8 * K.scale; this.alive = true;
     this.state = 'spawn'; this.st = 0; this.cool = 1 + Math.random() * 1.5; this.flash = 0; this.airborne = false; this.juggle = 0;
-    this.poise = this.maxPoise = this.isBoss ? 900 : 0; this.lastHit = -9; this.phase = 1; this.strafeDir = Math.random() < 0.5 ? 1 : -1;
+    this.poise = this.maxPoise = this.isBoss ? 700 : 0; this.lastHit = -9; this.phase = 1; this.strafeDir = Math.random() < 0.5 ? 1 : -1;
     this.time = Math.random() * 10; this.atk = null; this.timeScale = 1;
-    // 猎械（武器）
-    const wmat = new THREE.MeshStandardMaterial({ color: 0x9aa0b0, metalness: 0.8, roughness: 0.3, emissive: 0x40b0ff, emissiveIntensity: 0.2 });
-    this.wmat = wmat; let wg;
-    if (kind === 'grunt') { wg = new THREE.BoxGeometry(0.06, 0.12, 1.25); wg.translate(0, 0, 0.55); }
-    else if (kind === 'shooter') { wg = new THREE.BoxGeometry(0.5, 0.12, 0.6); wg.translate(0, 0, 0.2); }
-    else { wg = new THREE.BoxGeometry(0.5, 0.55, 1.2); wg.translate(0, 0, 0.85); const h2 = new THREE.CylinderGeometry(0.05, 0.05, 0.9, 6); h2.rotateX(Math.PI / 2); h2.translate(0, 0, 0.1); }
-    const weapon = new THREE.Mesh(wg, wmat); weapon.position.set(0, -0.34, 0.04); weapon.rotation.x = -0.4; this.rig.J.elR.add(weapon); this.weapon = weapon;
-    if (this.isBoss) { const cape = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.2, 6, 1, true), toon(0x1a1a24, { side: THREE.DoubleSide })); cape.position.set(0, -0.35, -0.08); this.rig.J.chest.add(cape); }
+    // 武器：有模型时用画图王的「鸦断」/锯齿砍刀挂在 hand_R_socket；否则用程序化占位
+    this.wIdle = 0x40b0ff;
+    if (this.rig.isModel) {
+      this.wmat = new THREE.MeshStandardMaterial({ emissive: 0x000000 }); // 远程/重型没有武器：只做占位，避免空引用
+      const prop = this.isBoss ? Models.props.cleaver : kind === 'grunt' ? Models.props.blade : null;
+      if (prop) {
+        const wpn = prop.clone(true); let mat = null; wpn.traverse((n) => { if (n.isMesh) { if (!mat) { mat = n.material.clone(); } n.material = mat; } });
+        if (mat) { this.wmat = mat; this.wIdle = 0xffffff; mat.emissive.setHex(0xffffff); mat.emissiveIntensity = this.isBoss ? 0.9 : 0.6; }
+        (this.rig.sockets.hand_R_socket || this.rig.bones.mixamorigRightHand).add(wpn); this.weapon = wpn;
+      }
+    } else {
+      const wmat = new THREE.MeshStandardMaterial({ color: 0x9aa0b0, metalness: 0.8, roughness: 0.3, emissive: 0x40b0ff, emissiveIntensity: 0.2 });
+      this.wmat = wmat; let wg;
+      if (kind === 'grunt') { wg = new THREE.BoxGeometry(0.06, 0.12, 1.25); wg.translate(0, 0, 0.55); }
+      else if (kind === 'shooter') { wg = new THREE.OctahedronGeometry(0.16, 0); wg.scale(0.6, 0.6, 2.2); wg.translate(0, 0, 0.3); wmat.color.setHex(0x400010); wmat.emissive.setHex(0xff2050); this.wIdle = 0xff2050; }
+      else if (kind === 'brute') { wg = new THREE.BoxGeometry(0.35, 0.35, 0.5); }
+      else { wg = new THREE.BoxGeometry(0.5, 0.55, 1.2); wg.translate(0, 0, 0.85); }
+      const weapon = new THREE.Mesh(wg, wmat); weapon.position.set(0, -0.34, 0.04); weapon.rotation.x = -0.4; this.rig.J.elR.add(weapon); this.weapon = weapon;
+      if (this.isBoss) { const cape = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.2, 6, 1, true), toon(0x1a1a24, { side: THREE.DoubleSide })); cape.position.set(0, -0.35, -0.08); this.rig.J.chest.add(cape); }
+    }
+    this.height = this.rig.isModel ? (this.isBoss ? 2.8 : kind === 'brute' ? 1.95 : 1.8) : 1.8 * K.scale * (kind === 'brute' ? 1.15 : 1);
     this.rig.root.scale.setScalar(0.01);
     this.blob = world.makeBlob(this.radius * 1.6);
   }
@@ -49,8 +69,9 @@ export class Enemy {
     const w = this.w, P = w.player; this.time += dt; this.st += dt;
     if (this.flash > 0) this.flash -= dt;
     if (this.isBoss && this.time - this.lastHit > 2.5 && this.state !== 'stagger') this.poise = Math.min(this.maxPoise, this.poise + 150 * dt);
-    this.coatMat.emissive.setRGB(this.flash > 0 ? 1.0 * this.flash / 0.12 : 0, 0, 0);
-    if (this.state === 'dead') { this.st += 0; const s = Math.max(0, 1 - this.st / 0.9); this.rig.root.scale.setScalar(this.K.scale * 0 + Math.max(0.01, s)); if (this.st < 0.6) w.fx.aura(this.pos, 2); if (this.st > 1.0) this.remove(); this.animate(dt); return; }
+    if (this.rig.isModel) { const f = this.flash > 0 ? this.flash / 0.12 : 0; this.coatMat.color.setRGB(1 + f * 2.2, 1 + f * 0.25, 1 + f * 0.25); }
+    else this.coatMat.emissive.setRGB(this.flash > 0 ? 1.0 * this.flash / 0.12 : 0, 0, 0);
+    if (this.state === 'dead') { this.st += 0; const s = this.rig.isModel ? (this.st < 1.1 ? 1 : Math.max(0, 1 - (this.st - 1.1) / 0.45)) : Math.max(0, 1 - this.st / 0.9); this.rig.root.scale.setScalar(this.K.scale * 0 + Math.max(0.01, s)); if (this.st < 0.6) w.fx.aura(this.pos, 2); if (this.st > (this.rig.isModel ? 1.6 : 1.0)) this.remove(); this.animate(dt); return; }
     const toP = new THREE.Vector3().subVectors(P.pos, this.pos).setY(0); const dist = toP.length(); const pyaw = Math.atan2(toP.x, toP.z);
     let grav = this.juggle > 0 ? 15 : 24;
     switch (this.state) {
@@ -82,7 +103,7 @@ export class Enemy {
     const P = w.player;
     if (this.isBoss) {
       const ph = this.hp / this.maxHp > 0.65 ? 1 : this.hp / this.maxHp > 0.3 ? 2 : 3;
-      if (ph > this.phase) { this.phase = ph; this.state = 'roar'; this.st = 0; w.onBossPhase(this, ph); return; }
+      if (ph > this.phase) { this.phase += 1; this.state = 'roar'; this.st = 0; w.onBossPhase(this, this.phase); return; } // 逐级转阶段：一次跨两档也不会跳过二阶段召唤
       if (dist > 3.4) want.copy(toP).normalize().multiplyScalar(this.K.speed * (ph === 3 ? 1.2 : 1));
       if (this.cool <= 0 && P.alive) {
         let a;
@@ -93,10 +114,10 @@ export class Enemy {
         this.beginAttack(a); return;
       }
     } else {
-      const ranged = this.kind === 'shooter';
-      const ideal = ranged ? 9 : 2.3;
-      const canAtk = this.cool <= 0 && P.alive && (ranged ? dist < 15 : dist < 3.0);
-      if (canAtk && w.takeToken(this)) { this.beginAttack(ranged ? 'shot' : 'slash'); return; }
+      const ranged = this.kind === 'shooter', brute = this.kind === 'brute';
+      const ideal = ranged ? 9 : brute ? 2.0 : 2.3;
+      const canAtk = this.cool <= 0 && P.alive && (ranged ? dist < 15 : dist < (brute ? 3.2 : 3.0));
+      if (canAtk && w.takeToken(this)) { this.beginAttack(ranged ? 'shot' : brute ? 'bslam' : 'slash'); return; }
       const hasTok = false;
       if (!ranged && this.cool <= 0 && dist >= 3.0) want.copy(toP).normalize().multiplyScalar(this.K.speed);
       else {
@@ -155,19 +176,19 @@ export class Enemy {
     else if (!a.fired) {
       a.fired = true;
       if (s.proj) w.enemyShoot(this, s.proj);
-      else { const o = s.at === 'target' ? a.origin : this.pos; w.enemyStrike(this, s, o, this.yaw); if (s.ring) w.rings.spawn(o, s.ring, 0.4, 0xff3050); }
+      else { const o = s.at === 'target' ? a.origin : this.pos; w.enemyStrike(this, s, o, this.yaw); if (s.ring) { w.rings.spawn(o, s.ring, 0.4, 0xff3050); w.impact(o, s.ring + 4); } }
     }
     if (s.lunge) { this.vel.x *= Math.exp(-14 * dt); this.vel.z *= Math.exp(-14 * dt); }
     if (a.t >= act) {
-      this.wmat.emissive.setHex(0x40b0ff); this.wmat.emissiveIntensity = 0.2;
+      this.wmat.emissive.setHex(this.wIdle); this.wmat.emissiveIntensity = 0.2;
       if (s.dash) { this.vel.x *= 0.15; this.vel.z *= 0.15; }
       a.i++;
       if (a.i < a.steps.length) this.startStep();
-      else { this.state = 'recover'; this.st = 0; this.recT = this.isBoss ? (this.phase === 3 ? 0.65 : 0.95) : 0.7; this.cool = this.isBoss ? 0.6 + Math.random() * 0.8 : 1.6 + Math.random() * 1.8; this.w.decals.hide(this); }
+      else { this.state = 'recover'; this.st = 0; this.recT = this.isBoss ? (this.phase === 3 ? 0.65 : 0.95) : 0.7; this.cool = this.isBoss ? 0.6 + Math.random() * 0.8 : this.kind === 'brute' ? 2.6 + Math.random() * 1.2 : 1.6 + Math.random() * 1.8; if (this.kind === 'brute') this.recT = 1.1; this.w.decals.hide(this); }
     }
   }
   forward() { return new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw)); }
-  interrupt() { if (this.atk) { this.w.decals.hide(this); this.atk = null; this.wmat.emissive.setHex(0x40b0ff); this.wmat.emissiveIntensity = 0.2; this.w.releaseToken(this); } }
+  interrupt() { if (this.atk) { this.w.decals.hide(this); this.atk = null; this.wmat.emissive.setHex(this.wIdle); this.wmat.emissiveIntensity = 0.2; this.w.releaseToken(this); } }
   // 受击
   takeHit(hit, dir, dmg) {
     if (!this.alive || this.state === 'spawn') return false;
@@ -182,15 +203,19 @@ export class Enemy {
       this.vel.x += dir.x * (hit.kb || 0) * 0.15; this.vel.z += dir.z * (hit.kb || 0) * 0.15;
       return true;
     }
+    if (this.K.armored && !hit.up && !hit.slamDown && dmg < 30 && !(hit.finisher)) { // 重型：霸体，小伤害只闪白、轻微后退，不打断
+      this.vel.x += dir.x * (hit.kb || 2) * 0.2; this.vel.z += dir.z * (hit.kb || 2) * 0.2; return true; }
     this.interrupt();
-    this.vel.x = dir.x * (hit.kb || 2); this.vel.z = dir.z * (hit.kb || 2);
+    this.vel.x = dir.x * (hit.kb || 2) * (this.K.armored ? 0.5 : 1); this.vel.z = dir.z * (hit.kb || 2) * (this.K.armored ? 0.5 : 1);
     if (hit.slamDown && this.airborne) { this.vel.y = -22; }
     else if (hit.up) { this.vel.y = Math.max(this.airborne ? this.vel.y : 0, hit.up); this.airborne = true; this.juggle = 1.2; this.state = 'air'; this.st = 0; }
     else if (this.airborne) { this.vel.y = Math.max(this.vel.y, 2.2); this.juggle = 0.8; this.state = 'air'; }
-    else { this.state = 'stagger'; this.st = 0; this.stunT = hit.stun || 0.35; }
+    else { this.state = 'stagger'; this.st = 0; this.stunT = hit.stun || 0.35; this._hitSerial = (this._hitSerial || 0) + 1; }
     return true;
   }
   die() {
+    this.w.creative?.shatterMask(this);
+    if (this.isBoss) this.w.creative?.bloom(this.pos, 2.6);
     this.alive = false; this.state = 'dead'; this.st = 0; this.interrupt(); this.w.onEnemyDead(this);
     this.vel.set(0, 3, 0);
   }
@@ -213,7 +238,39 @@ export class Enemy {
       default: pose = Poses.idle(this.time, 1);
     }
     if (this.state !== 'active') rig.body.rotation.y *= Math.exp(-20 * dt);
-    applyPose(rig, pose, k);
+    if (rig.isModel) this.driveClips(dt, hs); else applyPose(rig, pose, k);
   }
 }
+// 模型动画：状态 → clip（原地动画，位移由代码驱动）；预警 clip 按预警时长缩放，正好在出手时到位
+Enemy.prototype.driveClips = function (dt, hs) {
+  const r = this.rig, a = this.atk, s = a && a.steps[a.i]; const boss = this.isBoss;
+  switch (this.state) {
+    case 'spawn': case 'chase': if (hs > 0.5) r.play('run', { timeScale: clamp(hs / (boss ? 4.4 : 3.8), 0.6, 1.6), fade: 0.18 }); else r.play('idle', { fade: 0.25 }); break;
+    case 'windup': {
+      const clip = boss && a.name === 'slam' ? 'leap' : this.kind === 'shooter' ? 'windup' : 'windup';
+      if (boss && a.name === 'slam' && !a.jumping) r.play('windup', { key: 'w' + a.i + a.name + this.atkSerial(), loop: false, timeScale: r.clipDur('windup') / Math.max(0.2, a.wdur - 0.55), fade: 0.1 });
+      else if (boss && a.name === 'slam') r.play('leap', { key: 'leap' + this._atkSerial, loop: false, fade: 0.08 });
+      else r.play(clip, { key: 'w' + a.i + a.name + this.atkSerial(), loop: false, timeScale: r.clipDur('windup') / Math.max(0.15, a.wdur), fade: 0.1 });
+      break; }
+    case 'active': {
+      let clip = 'attack', ts = 1.4, at = 0;
+      if (this.kind === 'shooter') { clip = 'shoot'; ts = 1.2; at = 0.25; }
+      if (boss) { clip = { sweep3: a.i % 2 ? 'sweep2' : 'sweep', charge: 'charge', slam: 'slam', fan: 'shoot', shot: 'shoot', spin: 'spin' }[a.name] || 'sweep'; ts = clip === 'slam' ? 1 : 1.3; at = clip === 'slam' ? 0.4 : clip === 'shoot' ? 0.25 : 0.12; }
+      if (this.kind === 'brute') { ts = 1.1; at = 0.15; }
+      r.play(clip, { key: 'a' + a.i + a.name + this._atkSerial, loop: clip === 'charge' || clip === 'spin' ? null : false, timeScale: ts, at, fade: 0.05 });
+      break; }
+    case 'recover': r.play('idle', { fade: 0.35 }); break;
+    case 'stagger': r.play(boss && this.stunT > 1 ? 'stagger' : 'hit', { key: 'hit' + this._hitSerial, loop: false, fade: 0.05 }); break;
+    case 'air': r.play('launched', { key: 'air', loop: false, fade: 0.08 }); break;
+    case 'down': r.play('down', { fade: 0.15 }); break;
+    case 'getup': r.play('getup', { loop: false, timeScale: r.clipDur('getup') / 0.45, fade: 0.1 }); break;
+    case 'roar': r.play('roar', { loop: false, timeScale: r.clipDur('roar') / 1.3, fade: 0.15 }); break;
+    case 'dead': r.play('death', { loop: false, fade: 0.08 }); break;
+    default: r.play('idle', { fade: 0.25 });
+  }
+  // 已知美术问题：铁衡 sweep 第一段刀身竖着扫 → 该 clip 期间把武器绕刀身轴转 90°，让刃口水平
+  if (boss && this.weapon) { const want = r.clipName === 'sweep' ? -Math.PI / 2 : 0; this.weapon.rotation.y += (want - this.weapon.rotation.y) * (1 - Math.exp(-30 * dt)); }
+  r.update(dt);
+};
+Enemy.prototype.atkSerial = function () { if (this._atkRef !== this.atk) { this._atkRef = this.atk; this._atkSerial = (this._atkSerial || 0) + 1; } return this._atkSerial; };
 export { KINDS };

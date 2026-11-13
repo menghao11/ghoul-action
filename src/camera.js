@@ -53,14 +53,19 @@ export class CameraRig {
     // 避免穿楼：沿视线方向限制距离（同样经过平滑）
     const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);
     const dirx = Math.sin(this.yaw) * cp, diry = sp, dirz = Math.cos(this.yaw) * cp;
-    let maxD = dist;
+    let maxD = 99; // 先只算几何约束（墙/地面），再和期望距离合并
     const zLim = 10.3, xLim = 41.5;
     if (Math.abs(dirz) > 1e-4) { const dz = ((dirz > 0 ? zLim : -zLim) - this.focus.z) / dirz; if (dz > 0) maxD = Math.min(maxD, dz); }
     if (Math.abs(dirx) > 1e-4) { const dx = ((dirx > 0 ? xLim : -xLim) - this.focus.x) / dirx; if (dx > 0) maxD = Math.min(maxD, dx); }
     if (diry < 0) maxD = Math.min(maxD, (this.focus.y - 0.3) / -diry);
-    maxD = Math.max(1.6, maxD);
+    const wallD = Math.max(1.6, maxD); maxD = Math.max(1.6, Math.min(dist, maxD));
     this.preD += (maxD - this.preD) * (1 - Math.exp(-(maxD < this.preD ? 20 : 6) * dt));
     this.curDist = smoothDamp(this.curDist, this.preD, this.fv, 'd', maxD < this.curDist ? 0.1 : 0.35, dt);
+    // 防穿楼：拉近是"立即"的（硬约束，当帧生效，不经平滑，不会穿进墙），只有松开后的拉远才平滑
+    // 只对"墙/地面"硬约束；期望距离本身的变化（解锁、换目标）仍然平滑
+    if (this.curDist > wallD) { this.curDist = wallD; if (this.fv.d > 0) this.fv.d = 0; }
+    if (this.preD > wallD) this.preD = wallD;
+    this.dbg = [maxD, this.curDist, dist];
     const c = this.cam;
     c.position.set(this.focus.x + dirx * this.curDist, this.focus.y + diry * this.curDist, this.focus.z + dirz * this.curDist);
     c.lookAt(this.focus.x, this.focus.y, this.focus.z);

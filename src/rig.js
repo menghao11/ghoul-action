@@ -5,7 +5,7 @@ import { toon, addOutline } from './toon.js';
 const JOINTS = ['pelvis', 'spine', 'chest', 'head', 'shL', 'elL', 'shR', 'elR', 'hipL', 'knL', 'hipR', 'knR'];
 export function makeRig(o = {}) {
   const c = Object.assign({ coat: 0x16121a, skin: 0xe8d8d0, hair: 0xe8e8ee, pants: 0x0d0b10, accent: 0xff2040, scale: 1, outline: true, mask: true, coatTail: true }, o);
-  const root = new THREE.Group();
+  const root = new THREE.Group(); let rig_mask = null;
   const body = new THREE.Group(); root.add(body); body.scale.setScalar(c.scale);
   const J = {}; const meshes = [];
   const mk = (geo, mat, parent, pos, name) => {
@@ -27,8 +27,23 @@ export function makeRig(o = {}) {
   const hairG = new THREE.ConeGeometry(0.2, 0.26, 7); hairG.rotateX(-0.5); hairG.translate(0, 0.2, -0.05);
   mk(hairG, hair, J.head, [0, 0.05, 0], 'hair');
   if (c.mask) {
-    const mask = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.09, 0.05), toon(0x111014)); mask.position.set(0, 0.06, 0.15); J.head.add(mask); meshes.push(mask);
+    const mask = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.09, 0.05), toon(c.maskColor || 0x111014)); mask.position.set(0, 0.06, 0.15); J.head.add(mask); meshes.push(mask); if (!c.crow) rig_mask = mask;
     const eye = new THREE.Mesh(new THREE.SphereGeometry(0.028, 6, 4), accent); eye.position.set(-0.06, 0.15, 0.155); J.head.add(eye);
+  }
+  // 白鸦局面具：巡夜员 = 鸦喙面具 + 兜帽；弩手 = 护目镜面罩。击杀时由 creative.js 击碎
+  if (c.crow) {
+    const mg = new THREE.Group(); mg.position.set(0, 0.12, 0); J.head.add(mg); rig_mask = mg;
+    const white = toon(0xf0f0f4), dark = toon(0x16161c);
+    if (c.crow === 'beak') {
+      const face = new THREE.Mesh(new THREE.SphereGeometry(0.165, 8, 6, 0, Math.PI * 2, 0, Math.PI * 0.62), white); face.rotation.x = Math.PI / 2 - 0.2; face.position.set(0, 0, 0.03); mg.add(face);
+      const beak = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.26, 6), white); beak.rotation.x = Math.PI / 2 + 0.35; beak.position.set(0, -0.04, 0.24); mg.add(beak);
+      for (const sx of [-1, 1]) { const eye = new THREE.Mesh(new THREE.SphereGeometry(0.03, 6, 4), dark); eye.position.set(0.06 * sx, 0.03, 0.15); mg.add(eye); }
+      const hood = new THREE.Mesh(new THREE.ConeGeometry(0.23, 0.42, 7, 1, true), toon(c.coat, { side: THREE.DoubleSide, ...tg })); hood.position.set(0, 0.06, -0.04); hood.rotation.x = -0.25; J.head.add(hood);
+    } else {
+      const band = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.08, 0.1), dark); band.position.set(0, 0.03, 0.11); mg.add(band);
+      for (const sx of [-1, 1]) { const g = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.04, 8), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.5, 1.6, 2.2), toneMapped: false })); g.rotation.x = Math.PI / 2; g.position.set(0.065 * sx, 0.03, 0.17); mg.add(g); }
+      const jaw = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.06), dark); jaw.position.set(0, -0.07, 0.13); mg.add(jaw);
+    }
   }
   const limb = (r0, r1, len) => { const g = new THREE.CylinderGeometry(r0, r1, len, 6); g.translate(0, -len / 2, 0); return g; };
   for (const s of [1, -1]) {
@@ -47,7 +62,7 @@ export function makeRig(o = {}) {
   // 背部挂点（血绫根部）
   const back = new THREE.Group(); back.position.set(0, -0.02, -0.14); J.spine.add(back);
   const upperBack = new THREE.Group(); upperBack.position.set(0, 0.3, -0.16); J.chest.add(upperBack);
-  const rig = { root, body, J, meshes, back, upperBack, cfg: c, pose: {}, height: 1.75 * c.scale };
+  const rig = { root, body, J, meshes, back, upperBack, cfg: c, pose: {}, height: 1.75 * c.scale, mask: rig_mask };
   for (const j of JOINTS) rig.pose[j] = [0, 0, 0];
   rig.pelvisY = 0.95; rig.lean = 0;
   return rig;

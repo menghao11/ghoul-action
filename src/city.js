@@ -92,7 +92,7 @@ export function buildCity(scene, quality) {
   // 霓虹招牌 + 地面倒影
   const glow = glowTexture(), streak = streakTexture();
   const palette = ['#ff2a55', '#ff6a2a', '#ff2ad4', '#2ad4ff', '#ff3040', '#ffd02a'];
-  let si = 0; const neonMeshes = [];
+  let si = 0; const neonMeshes = []; const signList = [];
   for (const s of signs) {
     const text = NEON[si % NEON.length]; const col = palette[si % palette.length]; si++;
     const latin = /^[A-Z ]+$/.test(text); const vertical = !latin && rnd() < 0.7;
@@ -100,6 +100,7 @@ export function buildCity(scene, quality) {
     const sc = vertical ? 0.9 / 96 : 1.0 / 110; const W = w * sc, H = h * sc;
     const m = new THREE.Mesh(new THREE.PlaneGeometry(W, H), new THREE.MeshBasicMaterial({ map: t, toneMapped: false, color: new THREE.Color(1.6, 1.6, 1.6) }));
     const y = Math.min(s.h - H / 2 - 0.3, 3.5 + rnd() * 5);
+    m.material = m.material.clone();
     if (vertical) { m.position.set(s.x, y, s.z - s.side * 0.9); m.rotation.y = s.side > 0 ? -Math.PI / 2 : Math.PI / 2; // 竖招牌垂直于墙
       const m2 = m.clone(); m2.rotation.y += Math.PI; group.add(m2); }
     else { m.position.set(s.x, y, s.z - s.side * 0.05); m.rotation.y = s.side > 0 ? Math.PI : 0; }
@@ -107,6 +108,7 @@ export function buildCity(scene, quality) {
     const c = new THREE.Color(col);
     const refl = new THREE.Mesh(new THREE.PlaneGeometry(vertical ? 1.2 : W, 6), new THREE.MeshBasicMaterial({ map: streak, color: c, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false }));
     refl.rotation.x = -Math.PI / 2; refl.rotation.z = s.side > 0 ? Math.PI : 0; refl.position.set(s.x, 0.02, s.side * 7.8 - s.side * 3); group.add(refl);
+    signList.push({ m, mat: m.material, refl, x: s.x, y, z: m.position.z, out: 0, hold: 0, level: 1 });
   }
   // 路灯：灯头发光 + 地面光池；只有少量真实点光源（性能）
   const poleMat = new THREE.MeshStandardMaterial({ color: 0x222028, roughness: 0.6, metalness: 0.6 });
@@ -150,16 +152,25 @@ export function buildCity(scene, quality) {
   // 雨丝
   let rain = null;
   if (quality !== 'low') {
-    const N = quality === 'high' ? 1400 : 700; const rp = new Float32Array(N * 6);
-    for (let i = 0; i < N; i++) { const x = (rnd() - 0.5) * 60, y = rnd() * 18, z = (rnd() - 0.5) * 30; rp.set([x, y, z, x + 0.05, y + 0.5, z], i * 6); }
+    const N = quality === 'high' ? 2400 : 1200; const rp = new Float32Array(N * 6);
+    for (let i = 0; i < N; i++) { const x = (rnd() - 0.5) * 60, y = rnd() * 36, z = (rnd() - 0.5) * 30; rp.set([x, y, z, x + 0.05, y + 0.5, z], i * 6); } // 0..36 两层，循环无缝
     const rg = new THREE.BufferGeometry(); rg.setAttribute('position', new THREE.BufferAttribute(rp, 3));
     rain = new THREE.LineSegments(rg, new THREE.LineBasicMaterial({ color: 0x8a7090, transparent: true, opacity: 0.35, depthWrite: false })); rain.frustumCulled = false; scene.add(rain);
   }
   return {
     group, props, lights, neonMeshes,
-    update(dt, t, focus) {
-      if (rain) { rain.position.y = -((t * 22) % 18); rain.position.x = focus.x; rain.position.z = focus.z * 0.3; }
-      neonL.intensity = 9 + Math.sin(t * 13) * 0.6 + (Math.sin(t * 2.1) > 0.97 ? -4 : 0);
+    signs: signList, rainT: 0,
+    // timeScale：子弹时间/顿帧时雨滴几乎静止悬停在空中
+    update(dt, t, focus, timeScale = 1) {
+      this.rainT += dt * timeScale;
+      if (rain) { rain.position.y = -((this.rainT * 22) % 18); rain.position.x = focus.x; rain.position.z = focus.z * 0.3; rain.material.opacity = 0.35 + (1 - timeScale) * 0.35; }
+      neonL.intensity = 9 + Math.sin(t * 1.3) * 0.5; // 缓慢呼吸，不闪烁
+      for (const g of signList) { // 短路：迅速暗下 → 停留 → 缓慢重新亮起（平滑，不频闪）
+        if (g.hold > 0) { g.hold -= dt; g.level += (0.12 - g.level) * (1 - Math.exp(-25 * dt)); }
+        else g.level += (1 - g.level) * (1 - Math.exp(-1.6 * dt));
+        const c = 1.6 * g.level; g.mat.color.setRGB(c, c, c); g.refl.material.opacity = 0.4 * g.level;
+      }
     },
+    shortOut(pos, r, cb) { let n = 0; for (const g of signList) { const d = Math.hypot(g.x - pos.x, g.z - pos.z); if (d < r && g.hold <= 0) { g.hold = 0.5 + Math.random() * 0.5; n++; cb && cb(g); } } return n; },
   };
 }
