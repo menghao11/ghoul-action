@@ -6,8 +6,13 @@ import * as THREE from 'three';
 import { loadCharacter } from '../art/lib/toon3d_loader.js';
 import { GLTFLoader } from '../art/lib/loaders/GLTFLoader.js';
 import { clone as skClone } from '../art/lib/utils/SkeletonUtils.js';
+import { upgradeHero } from './herofix.js';
 
 const BASE = 'art/models/';
+// 角色观感：主角用冷色边缘光（和红色血绫、暖色街灯拉开），敌人用暗红边缘光，一眼分得清敌我
+const HERO_LOOK = { lift: 0x35314a, rim: 0x9db4ff, rimStrength: 0.62, rimPower: 2.4, spec: 0.12 };
+const FOE_LOOK = { lift: 0x2a2228, rim: 0xff6a5a, rimStrength: 0.34, rimPower: 2.8, spec: 0.05 };
+const BOSS_LOOK = { lift: 0x2a2630, rim: 0xffd9c0, rimStrength: 0.4, rimPower: 2.8, spec: 0.1 };
 export const Models = { ok: false, t: {}, props: {}, stats: null, error: null };
 
 export async function preloadModels({ mobile = false, quality = 'mid' } = {}) {
@@ -18,14 +23,15 @@ export async function preloadModels({ mobile = false, quality = 'mid' } = {}) {
   const t0 = performance.now();
   try {
     const [h, boss, melee, ranged, brute, cleaver, blade] = await Promise.all([
-      loadCharacter(BASE + hero, { outline, emissiveIntensity: 1.4 }),
-      loadCharacter(BASE + 'tieheng.glb', { outline: outline ? 0.016 : 0 }),
-      loadCharacter(BASE + 'foe_melee.glb', { outline, emissiveIntensity: 1.8 }),
-      loadCharacter(BASE + 'foe_ranged.glb', { outline, emissiveIntensity: 1.8 }),
-      loadCharacter(BASE + 'foe_brute.glb', { outline: outline ? 0.014 : 0, emissiveIntensity: 1.8 }),
+      loadCharacter(BASE + hero, { outline, emissiveIntensity: 1.4, look: HERO_LOOK }),
+      loadCharacter(BASE + 'tieheng.glb', { outline: outline ? 0.016 : 0, look: BOSS_LOOK }),
+      loadCharacter(BASE + 'foe_melee.glb', { outline, emissiveIntensity: 1.8, look: FOE_LOOK }),
+      loadCharacter(BASE + 'foe_ranged.glb', { outline, emissiveIntensity: 1.8, look: FOE_LOOK }),
+      loadCharacter(BASE + 'foe_brute.glb', { outline: outline ? 0.014 : 0, emissiveIntensity: 1.8, look: FOE_LOOK }),
       new GLTFLoader().loadAsync(BASE + 'cleaver_crow.glb'),
       new GLTFLoader().loadAsync(BASE + 'blade_foe.glb'),
     ]);
+    if (qs.get('herofix') !== '0') Models.heroFix = upgradeHero(h); // 主角体型加粗 + 重做待机/跑步/跳跃（?herofix=0 可对比原版）
     Object.assign(Models.t, { hero: h, boss, grunt: melee, shooter: ranged, brute });
     Models.props.cleaver = toonProps(cleaver.scene); Models.props.blade = toonProps(blade.scene);
     if (mobile) downscaleTextures(Object.values(Models.t).map((x) => x.root), 1024); // 手机：Boss 等 2048² 贴图降到 1024²，省显存
@@ -56,7 +62,7 @@ export function makeModelRig(kind, { scale = 1, flashable = false } = {}) {
     if (n.isSkinnedMesh) { n.frustumCulled = false; if (!n.userData.outline) skinned.push(n); }
   });
   let flashMat = null;
-  if (flashable) for (const m of skinned) { m.material = m.material.clone(); flashMat = m.material; flashMat.userData.baseEmissive = flashMat.emissive.clone(); }
+  if (flashable) for (const m of skinned) { const src = m.material; m.material = src.clone(); m.material.onBeforeCompile = src.onBeforeCompile; m.material.customProgramCacheKey = src.customProgramCacheKey; flashMat = m.material; flashMat.userData.baseEmissive = flashMat.emissive.clone(); }
   const mixer = new THREE.AnimationMixer(model); const actions = {};
   for (const c of tpl.clips) actions[c.name] = mixer.clipAction(c);
   const J = {}; for (const [k, b] of Object.entries(ARMOR_BONES)) J[k] = bones['mixamorig' + b] || null;

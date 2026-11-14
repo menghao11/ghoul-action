@@ -83,6 +83,13 @@ python3 -m http.server 8000
 - **绯魇调色**：全屏后期 pass（Bloom 之后），红色保留，其它颜色去饱和并偏向红黑，暗部柔和下压；约 0.6s 渐入、1s 渐出，无频闪。低画质也生效（仅在调色时启用后期链）。
 - **配乐节拍辉光**：血绫辉光随音乐拍点做很小的余弦起伏（`world.music.musicBeatPhase`）。
 
+## 主角观感与移动修正（第三轮）
+- **角色着色**（`art/lib/toon3d_loader.js` 的 `enhanceToon`）：5 级色阶、暗部抬升（深色布料不再糊进夜景）、菲涅尔边缘光、卡通高光带。主角冷色边缘光、敌人暗红、Boss 暖白，敌我一眼可分。纯着色，不加灯、不加 draw call。
+- **主角体型**（`src/herofix.js` 的 `reshapeHero`）：加载时沿各骨骼做径向放大（按蒙皮权重混合），大腿/小腿/手臂加粗、躯干加厚、胯部加宽。不改 GLB 文件。
+- **主角动作**（`buildHeroClips`）：idle / run / jog / jump 用两骨 IK 程序生成，替换 GLB 里的同名 clip。跑步着地期间脚踝相对身体恒速后移，循环时长按「着地位移 = 速度 × 着地时间」反推（`GAITS.run.speed` = 7.2 m/s），播放速度 = 实际速度 / 设计速度，着地脚滑动从约 8 cm/帧降到 0。摇杆轻推时用 jog（约 3.2 m/s），切换保持相位。
+- **转向压弯**：跑动中按转向角速度向弯内侧倾身（最大约 11°，平滑过渡）。
+- 对比原版：`?herofix=0`（体型和动作退回 GLB 原样）。
+
 ## 3D 角色（画图王）
 - `art/models/`：凌夜 `lingye.glb`（触屏/中低画质用 `lingye_1k.glb`）、铁衡 `tieheng.glb`（缩放 1.32 ≈ 2.8 m，猎械「鸦断」挂 `hand_R_socket`）、骨刃 `foe_melee.glb`（+锯齿砍刀）、晶刺 `foe_ranged.glb`、铁枷 `foe_brute.glb`。用 `art/lib/toon3d_loader.js` 的卡通材质 + 蒙皮描边，`SkeletonUtils.clone` 实例化（共享几何/贴图）。
 - 动画原地播放、位移由代码驱动；按招式第一次出手时间缩放 clip（如 light1 出手帧 0.14 s 对齐判定帧），状态间 0.05–0.25 s 交叉淡化。血绫从 `tendril_root` 长出。蒙皮残影用“冻结骨架”快照。
