@@ -285,7 +285,7 @@ const frameShot = async (p, name) => { await p.evaluate(() => new Promise((r) =>
     const fall = await p.evaluate(() => { __world.player.awake = 0.01; const ramp = []; for (let i = 0; i < 180; i++) { __world.step(1 / 60); ramp.push(__world.gradeAmt); } return { down: ramp.every((v, i) => i === 0 || v <= ramp[i - 1] + 1e-9), end: ramp[ramp.length - 1], maxStep: Math.max(...ramp.slice(1).map((v, i) => Math.abs(v - ramp[i]))) }; });
     const low = await p.evaluate(() => { __world.setQuality('low'); __world.gradeAmt = 0; const a = __dbg.pixelStats(); __world.gradeAmt = 0.9; const b = __dbg.pixelStats(); __world.gradeAmt = 0; __world.setQuality('high'); return { off: a.satNonRed, on: b.satNonRed }; });
     const fmt = (s) => ({ sat: +s.sat.toFixed(3), satNonRed: +s.satNonRed.toFixed(3), lum: +s.lum.toFixed(3), redRatio: +s.redRatio.toFixed(3), grade: +s.grade.toFixed(2) });
-    check('绯魇调色：全屏调色 pass（非红去饱和、偏红黑、不压全黑），渐入/渐出单调无频闪，低画质也生效', r.up && r.peak > 0.85 && awakeOn.satNonRed < awakeOff.satNonRed * 0.6 && awakeOn.redRatio > awakeOff.redRatio * 1.05 && awakeOn.lum > awakeOff.lum * 0.45 && fall.down && fall.end < 0.01 && fall.maxStep < 0.05 && low.on < low.off * 0.6,
+    check('绯魇调色：全屏调色 pass（非红去饱和、偏红黑、不压全黑），渐入/渐出单调无频闪，低画质也生效', r.up && r.peak > 0.85 && awakeOn.satNonRed < awakeOff.satNonRed * 0.6 && awakeOn.redRatio > awakeOff.redRatio * 1.03 /* 角色加了边缘光/暗部抬升后画面里非黑像素变多，红占比提升从约 5.5% 变为约 4.5%，阈值相应放宽 */ && awakeOn.lum > awakeOff.lum * 0.45 && fall.down && fall.end < 0.01 && fall.maxStep < 0.05 && low.on < low.off * 0.6,
       { before: fmt(before), awakeGradeOff: fmt(awakeOff), awakeGradeOn: fmt(awakeOn), rampUp: r, fall: { down: fall.down, maxStep: +fall.maxStep.toFixed(4) }, low });
   }
 

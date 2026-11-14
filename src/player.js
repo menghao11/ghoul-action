@@ -8,6 +8,7 @@ import { angDiff } from './camera.js';
 import { toon } from './toon.js';
 import { FINISHER_VARIANTS } from './creative.js';
 import { makeModelRig } from './models.js';
+import { GAITS } from './herofix.js';
 export const PERFECT_WINDOW = 0.26; // 完美闪避窗口（含端点，按帧起点判定）
 export const FINISHER_GATE = 0.8; // 绯魇开启后多少秒（真实时间）可放终焉
 
@@ -351,9 +352,19 @@ export class Player {
     const tornado = this.state === 'attack' && this.move && this.move.finisher && this.type === 'balanced' && this.mt > 0.3 && this.mt < 1.5;
     if (tornado) rig.body.rotation.y += dt * 16; // 游龙·终焉「龙卷」：身体旋转
     else if (!(this.state === 'attack' && this.move && this.move.pose === 'spin')) rig.body.rotation.y = rig.body.rotation.y % (Math.PI * 2) * Math.exp(-30 * dt);
+    { // 转向压弯：按转向角速度向弯内侧倾身（只在地面跑动时），平滑过渡
+      const yr = dt > 1e-5 ? angDiff(this._prevYaw ?? this.yaw, this.yaw) / dt : 0; this._prevYaw = this.yaw;
+      const want = this.state === 'move' && this.grounded ? clamp(-yr * 0.035, -0.2, 0.2) * clamp(hs / 7.2, 0, 1) : 0;
+      this.bank = (this.bank || 0) + (want - (this.bank || 0)) * (1 - Math.exp(-9 * dt)); rig.body.rotation.z = this.bank;
+    }
     if (rig.isModel) this.driveClips(dt); else applyPose(rig, pose, k);
     // 绯魇护甲动画
     const aw = this.awake > 0;
+    { // 绯魇时主角的边缘光从冷蓝渐变为赤红（和全屏调色一致），结束后渐变回去
+      const u = rig.isModel && rig.skinned[0] && rig.skinned[0].material.userData.toonUniforms;
+      if (u) { if (!this._rimBase) { this._rimBase = u.uRimColor.value.clone(); this._rimAwake = new THREE.Color(0xff2a48); }
+        this.rimMix = (this.rimMix || 0) + ((aw ? 1 : 0) - (this.rimMix || 0)) * (1 - Math.exp(-5 * dt)); u.uRimColor.value.copy(this._rimBase).lerp(this._rimAwake, this.rimMix); }
+    }
     for (const m of this.armorParts) { const s = m.scale.x + ((aw ? 1 : 0.001) - m.scale.x) * (1 - Math.exp(-10 * dt)); m.scale.setScalar(s); if (!aw && s < 0.01) m.visible = false; }
     root.updateMatrixWorld(true);
     if (this.armorAnchors && aw) { for (const [g, bone] of this.armorAnchors) { bone.getWorldPosition(_a); g.position.copy(rig.body.worldToLocal(_a)); } root.updateMatrixWorld(true); }
@@ -367,6 +378,10 @@ export class Player {
       case 'move':
         if (!this.grounded) r.play('jump', { key: 'jump' + (this.vel.y > 0 ? 'u' : 'd'), loop: false, fade: 0.12, at: this.vel.y > 0 ? 0 : 0.45 });
         else if (this.landT > 0) r.play('land', { loop: false, fade: 0.06 });
+        else if (hs > 0.6 && r.actions.jog) { // 步态按速度选（带滞回），播放速度 = 实际速度 / 步态设计速度 → 着地脚不滑步
+          const g = hs > (r.clipName === 'run' ? 4.2 : 5.0) ? 'run' : 'jog', prev = r.clipName === 'run' || r.clipName === 'jog' ? r.actions[r.clipName] : null;
+          r.play(g, { timeScale: clamp(hs / GAITS[g].speed, 0.5, 1.5), fade: 0.14, at: prev ? (prev.time / prev.getClip().duration) * r.clipDur(g) : 0 }); // 切步态时保持相位
+        }
         else if (hs > 0.6) r.play('run', { timeScale: clamp(hs / 6.5, 0.6, 1.6), fade: 0.15 });
         else r.play('idle', { fade: 0.22 });
         break;
